@@ -1,0 +1,53 @@
+# Builds SurgeXXL as an MPC plugin SDK folder (MPC OS 3.10.1+, 32- and 64-bit MPCs) and publishes the zip as a
+# GitHub release. Run it by hand with a tag name, or push a tag sdk-v*.
+name: SDK release
+on:
+  push:
+    tags: ['sdk-v*']
+  workflow_dispatch:
+    inputs:
+      tag: { description: 'Release tag, e.g. sdk-v0.2.0', required: true }
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - name: Tag
+        env: { INPUT_TAG: '${{ github.event.inputs.tag }}' }
+        run: |
+          t="$INPUT_TAG"; [ -n "$t" ] || t="$GITHUB_REF_NAME"
+          case "$t" in sdk-v[0-9]*) ;; *) echo "tag must look like sdk-v0.2.0, not '$t'"; exit 1 ;; esac
+          echo "TAG=$t" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Tools
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build libcairo2 zip llvm
+          pip install --break-system-packages ziglang==0.17.1 Pillow==12.3.0 CairoSVG==2.9.1
+      - name: Build
+        run: ./build.sh --sdk
+      - name: Check
+        run: |
+          P="build/sdk/L'Cronx - VST - SurgeXXL"
+          test -f "$P/plugin.json" && test -f "$P/Content/configuration.xml" && test -d "$P/Plugin Skins"
+          file "$P/VST/surgexxl-arm32.so" | grep -q "ELF 32-bit.*ARM"
+          file "$P/VST/surgexxl-arm64.so" | grep -q "ELF 64-bit.*aarch64"
+      - name: Package
+        run: |
+          VERSION="$(sed -n 's/^project(SurgeXXL VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
+          echo "ZIP=dist/surgexxl-$VERSION-mpc-sdk.zip" >> "$GITHUB_ENV"
+          mkdir -p dist
+          cp LICENSE "build/sdk/L'Cronx - VST - SurgeXXL/LICENSE"
+          (cd build/sdk && zip -q -r -9 "../../dist/surgexxl-$VERSION-mpc-sdk.zip" "L'Cronx - VST - SurgeXXL")
+          ls -la dist
+      - name: Publish
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          notes=".github/release-notes/$TAG.md"; [ -f "$notes" ] || { echo "SurgeXXL, MPC plugin SDK package ($TAG)" > /tmp/notes.md; notes=/tmp/notes.md; }
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --clobber
+          else
+            gh release create "$TAG" "$ZIP" --target "$GITHUB_SHA" --title "SurgeXXL $TAG (MPC plugin SDK)" --notes-file "$notes"
+          fi
