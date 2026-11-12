@@ -309,6 +309,13 @@ for i in range(8):
     cx = 74 + i * 90
     knob(T, "macro_%d" % (i + 1), cx, 340, 66, "", value=True, value_dy=24)
     readout(T, "macro_%d_name" % (i + 1), cx - 44, 375, 88, 22, size=14, colour="ffffff", align="center")
+header(T, 30, 420, 724, "MPE")
+seg(T, "mpe", [(30, 458, 96, 46), (132, 458, 96, 46)], ["OFF", "ON"], fs=20)
+knob(T, "mpe_bend", 330, 486, 74, "Bend Range", fs=15)
+text(T, 420, 452, 330, "Send the controller from a MIDI track:", 14, (0xcf, 0xcf, 0xcf), align="left")
+text(T, 420, 474, 330, "out port SurgeXXL MIDI In, channel Any.", 14, (0xcf, 0xcf, 0xcf), align="left")
+text(T, 420, 496, 330, "Bend Range: as the controller's (48).", 14, (0xcf, 0xcf, 0xcf), align="left")
+readout(T, "mpe_status", 30, 586, 724, 24, size=15, colour="c97a1c")
 header(T, 806, 50, 120, "SCENE")
 seg(T, "scene", [(806, 86, 60, 44), (872, 86, 60, 44)], fs=22)
 header(T, 960, 50, 290, "SCENE MODE")
@@ -342,7 +349,8 @@ DEFAULT_QLINKS = {
            "fx_p9", "fx_p10", "fx_p11", "fx_p12", "fx_type", "fx_sel", "fx_on", "fx_bypass",
            "send_1", "send_2", "send_3", "send_4", "ret_1", "ret_2", "ret_3", "ret_4"],
     "patch": ["macro_%d" % (i + 1) for i in range(8)] + ["patch", "volume", "poly_limit", "portamento", "bend_up",
-                                                         "bend_dn", "play_mode", "scene", "scene_mode", "split_key"],
+                                                         "bend_dn", "play_mode", "scene", "scene_mode", "split_key", "mpe",
+                                                         "mpe_bend"],
 }
 
 

@@ -18,16 +18,29 @@ GUARD = ("#ifndef CHUNK_MAX\n#define CHUNK_MAX 8192 /* SurgeXXL (tools/wrap_chun
          "#endif\n")
 
 
+CANDO_OLD = '!strcmp(p, "receiveVstTimeInfo")) ? 1 : -1;'
+CANDO_NEW = ('!strcmp(p, "receiveVstTimeInfo") ||\n'
+             '                !strcmp(p, "MPE")) ? 1 : -1;   /* SurgeXXL: MPC asks every plugin; Surge plays MPE */')
+
+
+def mpe_cando(text):
+    """MPC's host asks each plugin the capability question "MPE" (the MPC plugin SDK's docs/host-contract.md)."""
+    if text.count(CANDO_OLD) != 1:
+        sys.exit("wrap_chunk: the wrapper's effCanDo changed; update tools/wrap_chunk.py")
+    return text.replace(CANDO_OLD, CANDO_NEW)
+
+
 def main():
     src = os.path.join(sys.argv[1], "wrapper", "vst2_wrap.c")
     out = sys.argv[2]
     text = open(src).read()
-    if "CHUNK_MAX" in text:          # upstream has it already: use the file as it is
-        open(out, "w").write(text)
+    if "CHUNK_MAX" in text:          # upstream has it already: only the MPE answer is added
+        open(out, "w").write(mpe_cando(text))
         return
     if text.count(OLD) != 1 or text.count('#include "params.h"\n') != 1:
         sys.exit("wrap_chunk: mpc-vst-plugins' vst2_wrap.c changed; update tools/wrap_chunk.py")
     text = text.replace(OLD, NEW).replace('#include "params.h"\n', '#include "params.h"\n' + GUARD)
+    text = mpe_cando(text)
     open(out, "w").write(text)
 
 

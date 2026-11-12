@@ -189,3 +189,6 @@
 {"macro_6_name", B_ENGINE, "", 0, {}, 0.0f, 1.0f},
 {"macro_7_name", B_ENGINE, "", 0, {}, 0.0f, 1.0f},
 {"macro_8_name", B_ENGINE, "", 0, {}, 0.0f, 1.0f},
+{"mpe", B_ENGINE, "", 0, {}, 0.0f, 1.0f},
+{"mpe_bend", B_ENGINE, "", 0, {}, 1.0f, 96.0f},
+{"mpe_status", B_ENGINE, "", 0, {}, 0.0f, 1.0f},

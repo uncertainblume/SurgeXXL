@@ -25,8 +25,9 @@ and deliver it through the new open route Akai provides: no installer script, no
 you copy to a drive, and a build for the 64-bit MPCs (MPC Live III, MPC XL) as well as the 32-bit ones.
 
 **To play MPE on the MPC.** Surge ships a set of patches written for the LinnStrument, and Surge's engine has MPE
-voice handling built in. I wanted those sounds, played expressively, on an MPC. See [MPE](#mpe) for how far that
-has got, which is not all the way yet.
+voice handling built in. Those patches are wonderful in Surge on a computer, and I wanted them, played with
+per-note slides and pressure, on an MPC, perhaps as my main LinnStrument synth. Version 0.3.0 adds what that needs;
+see [MPE](#mpe) for what is there and what is still unproven.
 
 ## Status
 
@@ -39,9 +40,10 @@ has got, which is not all the way yet.
 >   unsaved work. **Save your project before you load it**, and do not use it in a session you cannot afford to lose.
 > - The pages and Q-Link layout were designed for the Akai Force. How well they work on other MPCs is not known.
 > - Some things are awkward or missing; see [Known problems](#known-problems).
+> - **No warranty, no liability.** See [Disclaimer](#disclaimer).
 
 Both libraries pass the original project's engine test and the SDK's validator. The SDK's host simulator still
-reports four selector parameters that do not read back after a state restore (see [Testing](#testing)). Please
+reports a few browser and popup selector parameters that do not read back exactly (see [Testing](#testing)). Please
 report what you find under Issues.
 
 | | |
@@ -57,10 +59,11 @@ report what you find under Issues.
   is empty. The only way to them is the PATCH page (the last tab): `<` and `>` step one patch at a time, `CAT`
   jumps to the next or previous category, and the PATCH Q-Link turns through the list; then press `LOAD`. There is
   no list view and no search. Finding one sound among thousands this way is tedious.
-- **No MPE switch yet.** See [MPE](#mpe).
+- **MPE is unproven on hardware.** The switch, the bend range and the MIDI port are built and pass their tests
+  offline; whether the MPC shows the port and keeps the channels is not confirmed. See [MPE](#mpe).
 - **Tested on almost no hardware.** Voice counts and CPU load on each MPC model are unmeasured.
 - **A large package.** About 450 MB on the drive, and it can be slow to copy and to scan.
-- **State restore of four selector parameters** is flagged by the SDK's host simulator (see [Testing](#testing)).
+- **A few selector parameters** are flagged by the SDK's host simulator (see [Testing](#testing)).
 
 If you hit something else, it is probably not you. Open an Issue.
 
@@ -84,6 +87,32 @@ Updating or removing the plugin never touches it.
 
 ## What this fork changed
 
+Two versions so far. **0.2.0** (`sdk-v0.2.0`) is the original instrument, repackaged for the SDK with a 64-bit
+build and two crash fixes, and nothing else. **0.3.0** adds MPE.
+
+### 0.3.0: MPE
+
+1. An **MPE switch** and an **MPE Bend Range** control on the PATCH page, on Q-Link page PATCH 3, saved in the
+   project. Three parameters were added at the end of the list, so projects made with 0.2.0 still load.
+2. **The plugin's own MIDI port**, "SurgeXXL MIDI In", so that each note keeps its channel. The technique and the
+   port code come from [mpc-mpe](https://github.com/uncertainblume/mpc-mpe).
+3. A **status line** that shows the port and the channels arriving by each route.
+4. The plugin answers yes to the MPC's "MPE" capability question.
+5. **Tests**: per-note bend at two bend ranges, up and down; a bend on another channel leaving the note alone;
+   the global channel; per-note pressure; polyphonic aftertouch; per-note timbre; MPE off; the setting kept across a
+   patch load and restored from the project state. All pass on the 64-bit build under an emulator.
+
+Details and set-up: [MPE](#mpe).
+
+### What comes next
+
+- **Confirming MPE on a real MPC with a LinnStrument**, and fixing what that turns up.
+- **Patches in the MPC's own preset list, with Surge's folder structure**, so that browsing 3008 patches stops being
+  a one-at-a-time job. This is not started. The plugin interface offers a flat list of programs, and the wrapper
+  this plugin is built on caps it at 1024, so it needs design work first.
+
+### 0.2.0: the SDK package
+
 - **The SDK plugin folder.** `./build.sh --sdk` builds `plugin.json`, `version.xml`, `VST/surgexxl-arm32.so`,
   `VST/surgexxl-arm64.so`, `Plugin Skins/` and Surge's data as `Content/`, as the SDK's
   `docs/plugin-folder-format.md` describes. It passes the SDK's `tools/validate.py`.
@@ -103,21 +132,73 @@ produces.
 
 ## MPE
 
-The honest state of it:
+New in 0.3.0. **Built and tested offline; not yet confirmed on an MPC.**
 
-- Surge's MPE voice handling is compiled in, and the plugin passes each note's MIDI channel, pitch bend, channel
-  pressure and controllers on to Surge.
-- Surge's 63 **LinnStrument MPE** patches are in the browser, under that category.
-- **There is no switch to turn Surge's MPE mode on yet.** Surge keeps MPE off until told otherwise, and the pages
-  have no control for it. Until that is added, those patches play as ordinary patches: per-note bend, pressure and
-  timbre do not reach individual voices.
-- Whether the MPC passes per-note channels through to an external plugin has not been tested either.
+### What is there
 
-Adding that switch, and testing it with a LinnStrument, is the next piece of work.
+- **An MPE switch** on the PATCH page (the last tab), with a **Bend Range** control beside it (1 to 96 semitones,
+  48 by default, which is the MPE standard and the LinnStrument's MPE setting). Both are saved with the MPC project
+  and stay as they are when you load another patch.
+- With MPE on, Surge's own MPE voice handling does the work: each note's **pitch bend** (slides), **pressure**
+  (channel pressure on the note's channel) and **timbre** (CC 74, the LinnStrument's Y axis) reach that note's voice
+  and no other. **Polyphonic aftertouch** reaches the key it was sent for, with MPE on or off. Channel 1 is the
+  global channel: a bend there moves every note, by the scene's own Bend Up / Down.
+- If the controller announces its bend range (the LinnStrument does, with RPN 0), Surge follows it and the Bend
+  Range control shows it.
+- **The plugin's own MIDI port, "SurgeXXL MIDI In".** This is the part that makes MPE possible on an MPC at all,
+  and it comes from the [mpc-mpe](https://github.com/uncertainblume/mpc-mpe) project (see below).
+- A **status line** under the switch: whether the port opened, and the channels note-ons have arrived on by each
+  route (`SurgeXXL MIDI In: ch 2-8 | track: ch 1`). It is there so the routing can be checked on the device.
+
+### Why a MIDI port
+
+The MPC's sequencer records and plays each event's MIDI channel, so one track can hold an MPE performance. But a
+plugin on a track is handed every note-on on channel 1, whatever channel it was played on. MPE depends on each
+note's channel, so MPE through the track cannot work. A plugin can, however, open a MIDI port of its own at
+operating-system level; the MPC lists it beside the hardware ports, and data sent to it keeps its channels. The
+evidence, the measurements and the design are in mpc-mpe's
+[docs/research.md](https://github.com/uncertainblume/mpc-mpe/blob/main/docs/research.md); the port code here
+(`src/alsa_seq.h`) is that project's.
+
+Once the port has delivered anything, SurgeXXL ignores MIDI from its own track (so nothing plays twice) until the
+plugin is loaded again.
+
+### Setting it up with a LinnStrument
+
+On the MPC:
+
+1. Preferences > MIDI / Sync > Input Ports, the LinnStrument's row: **Track** on, **Global** off.
+2. Add a **plugin track** with SurgeXXL. On its PATCH page turn **MPE** on.
+3. Add a **MIDI track**: MIDI Input Port the LinnStrument, Input Channel **All**; MIDI Output Port **SurgeXXL MIDI
+   In**, Output Channel **Any**; Monitor **Auto** (or Merge); record-arm it.
+4. Load a patch from the **LinnStrument MPE** category and play. Record on the MIDI track: every event is stored
+   with its channel and plays back as played.
+
+On the LinnStrument (Per-Split Settings): MIDI Mode **ChPerNote**, Main channel 1, Per-Note channels 2 and up, Bend
+Range **48**, Timbre/Y **CC 74**, Loudness/Z **Channel Pressure** (Poly Pressure also works). Holding the ChPerNote
+button sets the firmware's MPE setup in one go.
+
+Then read the status line. `SurgeXXL MIDI In: ch 2-8` (or however many channels you play) is right. `ch 1` only
+means the channels were flattened on the way: check Input Channel All and Output Channel Any. `No MIDI port` means
+the MPC did not let the plugin open a port. mpc-mpe's
+[routing guide](https://github.com/uncertainblume/mpc-mpe/blob/main/docs/routing-guide.md) has more recipes and a
+troubleshooting table.
+
+### What is not known yet
+
+- Whether MPC OS 3.10.1's official plugin loader shows the port. The community measured this technique on 3.9.1
+  with their own loader; Akai's SDK neither documents nor forbids it, and a later MPC OS could stop listing such
+  ports.
+- Whether live monitoring through a MIDI track keeps channels, or only playback does.
+- The plugin now answers yes when the MPC asks whether it understands MPE. What the MPC does differently for a
+  plugin that says yes is undocumented. If the status line ever shows `track: ch 2-8`, the MPC is passing channels
+  to the track directly and the port is not needed.
+- MIDI through the port is timed to the audio block: about 3 ms at the default 128 frames.
 
 ## About this fork, and how it was made
 
-I am not a coder. This port was made with [Claude](https://claude.com/claude-code), Anthropic's AI model,
+I am not a coder. This is vibe coded to the max: I describe what I want and an AI writes all of it. This port was
+made with [Claude](https://claude.com/claude-code), Anthropic's AI model,
 working in the repository: Claude read the original project and Akai's SDK, wrote the build changes, found and
 fixed the two crashes above, and ran the tests. I chose the goal and the direction, and the testing on real hardware falls to me.
 
@@ -126,7 +207,30 @@ an Issue and say which MPC and which MPC OS version you have and what you did; t
 deal. Please be patient, and please do not take problems with this fork to L'Cronx or the Surge Synth Team: they
 did not make this package.
 
+## Disclaimer
+
+This software is provided **as is, with no warranty of any kind**, and you use it **entirely at your own risk**.
+It is experimental, written by an AI at the direction of someone who cannot review the code, and barely tested on
+real hardware. It runs inside the MPC's own application with no crash protection.
+
+To the fullest extent the law allows, nobody involved in this fork accepts any liability for anything that
+happens as a result of using it: crashes, freezes, lost or corrupted projects, lost work, lost time, a ruined
+session or performance, damage to equipment or hearing, or anything else. That holds for the original authors of
+SurgeXXL, Surge XT and the libraries too, none of whom made this package. Sections 15 and 16 of the GNU General
+Public License, version 3 (`LICENSE`), which cover exactly this, apply in full.
+
+Back up your projects. Keep the volume down the first time you load it. Do not rely on it on stage.
+
+This is an unofficial community project. It is not made, tested, supported or endorsed by Akai Professional,
+inMusic, the Surge Synth Team, L'Cronx or Roger Linn Design. Using third-party plugins is at your own risk as far
+as Akai is concerned too: read the warning the MPC shows when you turn External Plugin Support on.
+
 ## Thanks
+
+- **[mpc-mpe](https://github.com/uncertainblume/mpc-mpe)**, the earlier project in which the way to get MPE into
+  an MPC plugin was researched and built (also with Claude): the finding that a plugin's own MIDI port keeps its
+  channels, the port code used here, and the routing recipes. It in turn rests on what the community measured in
+  [mpc-vst-plugins](https://github.com/sd88me/mpc-vst-plugins) and on the LinnStrument's open-source firmware.
 
 - **L'Cronx**, for [SurgeXXL](https://github.com/sunskiefer/SurgeXXL). This fork is a repackaging of their
   instrument.
@@ -175,7 +279,7 @@ shows that one.
 | STEP SEQ | The selected LFO's 16 steps (bipolar), loop start and end. The LFO plays them when its shape is Step Seq |
 | MOD | The scene's modulation routings: ROUTING (turn through them; past the last one: NEW), SOURCE, TARGET (LEARN, then touch or turn any control on any page), DEPTH, CLEAR |
 | FX | The 16 slots (A and B inserts, sends, globals 1-4); the selected slot's type, its twelve parameters (named for the type), On; the scene's four send levels and the four returns; FX Chain bypass |
-| PATCH | The patch browser (`<` `>`, `CAT`, PATCH on a Q-Link), LOAD, SAVE, the loaded patch's name; the 8 macros with the patch's own names; Scene A/B, Scene Mode, Play Mode, Poly Limit, Portamento, Bend Up / Down, Split Point, Volume, PANIC |
+| PATCH | The patch browser (`<` `>`, `CAT`, PATCH on a Q-Link), LOAD, SAVE, the loaded patch's name; the 8 macros with the patch's own names; Scene A/B, Scene Mode, Play Mode, Poly Limit, Portamento, Bend Up / Down, Split Point, Volume, PANIC; MPE (Off / On), MPE Bend Range and the MPE status line (this fork, 0.3.0) |
 
 The other six voice LFOs and scene LFOs (Surge's 4-6) still run as the patches use them; the pages show 1-3 of each
 because the Force's own automation covers the rest. MSEG and Formula LFOs play as the patch made them (they are
@@ -248,22 +352,29 @@ Releases: mpc-vst-plugins' `tools/release.py` (docs/RELEASING.md there), license
   and plays a chord with bounded output, counting the patches that had a removed FX; every FX type plays; the
   wavetables (picture numbers, a user wavetable added and rescanned); SAVE; the state restored on a second instance;
   LEARN. On x86 and as the Force build under `qemu-arm`.
+- MPE (0.3.0), in the same test: on a sine patch, the pitch of a held note is measured while per-note bend,
+  pressure, polyphonic aftertouch and timbre are sent on its own channel and on another one, with MPE on and off.
+  The MIDI port itself cannot be tested offline (the emulator has no ALSA sequencer); it is the mpc-mpe code,
+  which that project tests against the ALSA headers.
 - mpc-vst-plugins' `tools/host_test.c` on the whole plugin (wrapper and engine): names, set/get, option stepping by
   wheel and Q-Link, the long lists' stepping, popups, note to audio, MPC's STOP quirk, the chunk, CC Q-Links, two threads.
 - The SDK package: the SDK's `tools/validate.py` on the folder (0 errors; one warning, that `Content/` is over
   256 MB), and its `tools/host-sim` built for ARM and run under qemu on both libraries. `host_sim` passes its load,
-  render, block size, parameter sweep and teardown checks and fails its state round trip on four parameters:
-  Wavetable, Wavetable Picture, Mod Source List and FX Type List. These are browser and popup selectors, not part of
-  the sound, and the saved state itself comes back byte for byte; that they are harmless on a device is not yet
-  confirmed.
+  render, block size and teardown checks, and reports FAIL on a few parameters in its random sweep and state round
+  trip; which ones depends on its random seed. All of them are browser and popup selectors (Patch, Wavetable,
+  Wavetable Picture, and the "List" parameters that say whether a popup is open), which step through a list or are
+  not part of the saved sound. The saved state itself comes back byte for byte. That they are harmless on a device
+  is not yet confirmed.
 - The skin: `./build.sh --skin-only`, then mpc-vst-plugins' `tools/studio.py preview` (the pages above are its output).
 
 ## Credits and licences
 
 - **SurgeXXL** (the plugin layer, the pages, the tools): L'Cronx, GPL-3.0-or-later
   ([sunskiefer/SurgeXXL](https://github.com/sunskiefer/SurgeXXL)).
-- **This fork** (the SDK packaging, the 64-bit build and its fixes): made with Claude, under the same licence,
+- **This fork** (the SDK packaging, the 64-bit build and its fixes, MPE): made with Claude, under the same licence,
   GPL-3.0-or-later (`LICENSE`).
+- **The MIDI port** (`src/alsa_seq.h`): from [mpc-mpe](https://github.com/uncertainblume/mpc-mpe), MIT licence
+  (in the file's header and `src/VENDORED.md`).
 - **Surge XT**: the Surge Synth Team and contributors, originally by Claes Johanson (Vember Audio), GPL-3.0-or-later
   (`third_party/surge`, see `src/VENDORED.md`), with its libraries under their own licences: the sst libraries
   (GPL-3.0, MIT), LuaJIT (MIT), SIMDe (MIT), fmt (MIT), PEGTL (MIT), Mutable Instruments' eurorack code (MIT),

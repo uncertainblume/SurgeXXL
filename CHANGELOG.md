@@ -1,6 +1,27 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
+MPE. Built and tested offline; not yet confirmed on an MPC.
+- **MPE switch and MPE Bend Range** (1-96 semitones, 48 by default) on the PATCH page and Q-Link page PATCH 3. With
+  MPE on, each note's pitch bend, pressure and timbre (CC 74) reach its own voice through Surge's MPE voice handling;
+  channel 1 is the global channel. Both settings are the instance's: saved in the project, kept across patch loads.
+  A controller that announces its bend range (RPN 0) sets it.
+- **The plugin's own MIDI port, "SurgeXXL MIDI In"** (ALSA sequencer, `src/alsa_seq.h`). MPC hands a plugin on a
+  track every note-on on channel 1, so MPE cannot arrive through the track; a MIDI track whose output port is this
+  one, output channel Any, keeps each event's channel. Once the port has delivered anything the track's own MIDI is
+  ignored. The technique, its evidence and the port code are from the mpc-mpe project
+  (https://github.com/uncertainblume/mpc-mpe, MIT).
+- **MPE status line** on the PATCH page: the port, and the channels note-ons have arrived on by port and by track.
+- The plugin answers yes to the host's "MPE" capability question.
+- Saving the project while a patch is loading now waits for the load instead of saving no state (found by the
+  SDK's `host_sim`).
+- Three parameters appended (`mpe`, `mpe_bend`, `mpe_status`): 0.2.0 projects load unchanged, with MPE off.
+- `engine_test` measures per-note bend (two ranges, both directions), another channel's bend, the global channel,
+  per-note pressure, polyphonic aftertouch, per-note timbre, MPE off, and the setting across a patch load and a
+  state restore.
+- Next: confirming all of this on a device, then Surge's patches in the MPC's preset list with their folders.
+
+## 0.2.0 (SDK package, `sdk-v0.2.0`)
 - **64-bit MPCs (MPC Live III, MPC XL) and MPC OS 3.10.1's External Plugin Support**: `./build.sh --sdk` builds the
   plugin folder of Akai's MPC plugin SDK (`plugin.json`, `VST/surgexxl-arm32.so` and `-arm64.so`, `Plugin Skins/`,
   `Content/`) for a drive's `VST2 Plugins` folder. The user folder is then `SurgeXXL` at the root of that drive.
@@ -10,7 +31,8 @@
   and the crash log's signal handlers pointing at unmapped code (a crash at exit in the SDK's `host_sim`).
 - The crash log names pc, lr and sp on aarch64 too. `test/run_tests.sh arm64`.
 
-## 0.2.0
+
+## 0.2.0 (the Force, upstream)
 - **Fixed: SurgeXXL loaded nothing (or took MPC down when a track switched to it) on every Force.** MPC's service runs
   with no `HOME` variable, and Surge's start-up asked for the home folder before anything else, so no instance could
   ever be made: the crash log said `create: exception The environment variable HOME is unset or empty`. Surge now never

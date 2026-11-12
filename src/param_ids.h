@@ -189,4 +189,7 @@
 #define P_MACRO_6_NAME 186
 #define P_MACRO_7_NAME 187
 #define P_MACRO_8_NAME 188
-#define P_COUNT 189
+#define P_MPE 189
+#define P_MPE_BEND 190
+#define P_MPE_STATUS 191
+#define P_COUNT 192

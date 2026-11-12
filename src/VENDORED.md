@@ -14,6 +14,14 @@
   JUCE's `LICENSE.md`. Test, doc and example folders of the libraries are left out.
 - Added: `VERSION_GIT_INFO` (Surge's version files without git: version, branch, commit).
 
+## The MIDI port (`src/alsa_seq.h`)
+
+- From https://github.com/uncertainblume/mpc-mpe, `shared/mpe/alsa_seq.h`, commit `0e9fe58` (2026-11-12), unchanged.
+- Licence: MIT, Copyright (c) 2026 the mpc-mpe contributors (SPDX line in the file; MIT is compatible with this
+  project's GPL-3.0-or-later).
+- A plugin's own ALSA sequencer port, opened through `dlopen("libasound.so.2")`: no ALSA headers or link flags, and
+  without ALSA the plugin simply has no port.
+
 ### Local changes (each marked "SurgeXXL" in the file)
 
 1. `src/CMakeLists.txt`: clap-juce-extensions is not added when `SURGE_SKIP_JUCE_FOR_RACK` is on (the headless build

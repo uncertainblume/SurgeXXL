@@ -258,6 +258,14 @@ P += [
 # MACROS (Surge's 8 macro controls, with the patch's own names)
 P += [eng_num("macro_%d" % (i + 1), "Macro %d" % (i + 1), 0.0, 1.0, 0.0) for i in range(8)]
 P += [readout("macro_%d_name" % (i + 1), "Macro %d Name" % (i + 1)) for i in range(8)]
+# ---- MPE (0.3.0; the list is append-only) ----------------------------------------------------------
+# Surge's MPE mode and its per-note bend range, as Surge's own menu sets them. They belong to the instance, not the
+# patch: loading a patch keeps them, and the project stores them (src/engine.cpp, the state's MPE section).
+P += [
+    eng_opts("mpe", "MPE", ["Off", "On"], 0),
+    eng_num("mpe_bend", "MPE Bend Range", 1, 96, 48, display="int"),
+    readout("mpe_status", "MPE Status"),
+]
 
 # ---- checks --------------------------------------------------------------------------------------------------------
 keys = [p["key"] for p in P]

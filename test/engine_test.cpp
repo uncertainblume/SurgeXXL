@@ -362,6 +362,132 @@ void testSave(void *s) {
   printf("ok   SAVE writes SurgeXXL 001 to the user folder and browses to it\n");
 }
 
+// MPE (the switch on the PATCH page). The pitch of a sine patch is counted from its zero crossings, and every check is
+// a ratio to the unbent note. A note is held on channel 2; `extra` are messages sent after the note-on.
+struct Msg { uint8_t b[3]; };
+Msg bend(int ch, int v14) { return {{(uint8_t)(0xe0 | ch), (uint8_t)(v14 & 0x7f), (uint8_t)(v14 >> 7 & 0x7f)}}; }
+Msg pressure(int ch, int v) { return {{(uint8_t)(0xd0 | ch), (uint8_t)v, 0}}; }
+Msg polyAt(int ch, int key, int v) { return {{(uint8_t)(0xa0 | ch), (uint8_t)key, (uint8_t)v}}; }
+Msg cc(int ch, int n, int v) { return {{(uint8_t)(0xb0 | ch), (uint8_t)n, (uint8_t)v}}; }
+double mpePitch(void *s, std::vector<Msg> extra, std::vector<Msg> reset) {
+  uint8_t on[3] = {0x91, 69, 100}, off[3] = {0x81, 69, 64};
+  E->midi(s, on, 3);
+  for (auto &m : extra) E->midi(s, m.b, (m.b[0] & 0xf0) == 0xd0 ? 2 : 3);
+  render(s, 8820);                                                    // the attack, and Surge's smoothing
+  int16_t buf[256];
+  long crossings = 0, frames = 0;
+  int16_t last = 0;
+  while (frames < 44100) {
+    E->render(s, buf, 128);
+    for (int i = 0; i < 128; ++i) {
+      if (last <= 0 && buf[2 * i] > 0) ++crossings;
+      last = buf[2 * i];
+    }
+    frames += 128;
+  }
+  E->midi(s, off, 3);
+  for (auto &m : reset) E->midi(s, m.b, (m.b[0] & 0xf0) == 0xd0 ? 2 : 3);
+  render(s, 22050);
+  return crossings * 44100.0 / frames;
+}
+double semis(double f, double ref) { return 12.0 * log2(f / ref); }
+// route a source to the oscillator's pitch (LEARN), so a per-note source is heard as a pitch change
+void routeToPitch(void *s, int src) {
+  seti(s, "mod_slot", 64);
+  seti(s, "mod_src", src);
+  tap(s, "mod_learn");
+  setf(s, "osc_pitch", atof(get(s, "osc_pitch").c_str()));
+  setf(s, "mod_depth", 0.5);
+  render(s, 512);
+}
+void testMpe(void *s) {
+  tap(s, "panic");
+  {   // a known sound whatever the tests before left: Surge's Init Sine template
+    int n = atoi(get(s, "test_num_patches").c_str()), at = -1;
+    for (int i = 0; i < n && at < 0; ++i) {
+      seti(s, "patch", i);
+      if (get(s, "patch_browse") == "Init Sine") at = i;
+    }
+    CHECK(at >= 0, "Init Sine is in the library");
+    tap(s, "patch_load");
+    CHECK(waitLoaded(s), "Init Sine loads");
+  }
+  seti(s, "scene", 0);
+  seti(s, "osc_sel", 0);
+  seti(s, "mpe", 0);
+  seti(s, "scene_mode", 0);
+  seti(s, "osc_type", 1);                     // Sine
+  for (const char *k : {"mix_o2", "mix_o3", "mix_noise", "mix_r12", "mix_r23"}) setf(s, k, 0.0);
+  seti(s, "bend_up", 2);
+  seti(s, "bend_dn", 2);
+  seti(s, "fx_bypass", 3);                    // All Off
+  render(s, 4410);
+  CHECK(get(s, "mpe") == "0", "MPE is off by default: %s", get(s, "mpe").c_str());
+  const int C = 8192;
+  double flat = mpePitch(s, {}, {});
+  CHECK(flat > 50 && flat < 2000, "the test note is %.1f Hz", flat);
+  // MPE off: a bend is the scene's range (2 semitones), and a bend on any channel is global
+  double d = semis(mpePitch(s, {bend(1, 16383)}, {bend(1, C)}), flat);
+  CHECK(fabs(d - 2.0) < 0.15, "MPE off, full bend: %.2f semitones (want 2)", d);
+  double offOther = semis(mpePitch(s, {bend(2, 16383)}, {bend(2, C)}), flat);
+  CHECK(fabs(offOther - 2.0) < 0.15, "MPE off, a bend on another channel: %.2f semitones (want 2: it is global)", offOther);
+  // MPE on
+  seti(s, "mpe", 1);
+  seti(s, "mpe_bend", 48);
+  render(s, 1024);
+  CHECK(get(s, "mpe") == "1" && get(s, "mpe_bend") == "48", "MPE on, range 48: %s %s", get(s, "mpe").c_str(),
+        get(s, "mpe_bend").c_str());
+  double b48 = semis(mpePitch(s, {bend(1, C + 2048)}, {bend(1, C)}), flat);    // a quarter of full bend
+  CHECK(fabs(b48 - 12.0) < 0.15, "MPE on, quarter bend at range 48: %.2f semitones (want 12)", b48);
+  double dn48 = semis(mpePitch(s, {bend(1, C - 2048)}, {bend(1, C)}), flat);
+  CHECK(fabs(dn48 + 12.0) < 0.15, "MPE on, quarter bend down at range 48: %.2f semitones (want -12)", dn48);
+  seti(s, "mpe_bend", 24);
+  render(s, 1024);
+  double b24 = semis(mpePitch(s, {bend(1, C + 2048)}, {bend(1, C)}), flat);
+  CHECK(fabs(b24 - 6.0) < 0.15, "MPE on, quarter bend at range 24: %.2f semitones (want 6)", b24);
+  double other = semis(mpePitch(s, {bend(2, 16383)}, {bend(2, C)}), flat);
+  CHECK(fabs(other) < 0.1, "MPE on, a bend on channel 3 moved the note on channel 2 by %.2f semitones", other);
+  // the global channel (1) bends every note, by the scene's range
+  double glob = semis(mpePitch(s, {bend(0, 16383)}, {bend(0, C)}), flat);
+  CHECK(fabs(glob - 2.0) < 0.15, "MPE on, a bend on the global channel: %.2f semitones (want 2)", glob);
+  // per-note pressure: channel pressure on the note's own channel reaches that voice, on another channel does not
+  routeToPitch(s, 3);                         // Channel Aftertouch
+  double pOwn = semis(mpePitch(s, {pressure(1, 127)}, {pressure(1, 0)}), flat);
+  double pOther = semis(mpePitch(s, {pressure(2, 127)}, {pressure(2, 0)}), flat);
+  CHECK(pOwn > 0.5, "MPE on, pressure on the note's channel: %.2f semitones (want a rise)", pOwn);
+  CHECK(fabs(pOther) < 0.1, "MPE on, pressure on another channel moved the note by %.2f semitones", pOther);
+  tap(s, "mod_clear");
+  // polyphonic aftertouch (key pressure), for controllers that send it
+  routeToPitch(s, 2);                         // Polyphonic Aftertouch
+  double paOwn = semis(mpePitch(s, {polyAt(1, 69, 127)}, {polyAt(1, 69, 0)}), flat);
+  double paOther = semis(mpePitch(s, {polyAt(1, 60, 127)}, {polyAt(1, 60, 0)}), flat);
+  CHECK(paOwn > 0.5, "poly aftertouch on the held key: %.2f semitones (want a rise)", paOwn);
+  CHECK(fabs(paOther) < 0.1, "poly aftertouch on another key moved the note by %.2f semitones", paOther);
+  tap(s, "mod_clear");
+  // per-note timbre (slide): CC 74 on the note's own channel
+  routeToPitch(s, 28);                        // Timbre
+  double tLow = semis(mpePitch(s, {cc(1, 74, 0)}, {cc(1, 74, 64)}), flat);
+  double tHigh = semis(mpePitch(s, {cc(1, 74, 127)}, {cc(1, 74, 64)}), flat);
+  double tOther = semis(mpePitch(s, {cc(2, 74, 127)}, {cc(2, 74, 64)}), flat) -
+                  semis(mpePitch(s, {cc(2, 74, 0)}, {cc(2, 74, 64)}), flat);
+  CHECK(tHigh - tLow > 0.5, "MPE on, timbre (CC 74) on the note's channel: %.2f semitones between 0 and 127", tHigh - tLow);
+  CHECK(fabs(tOther) < 0.1, "MPE on, timbre on another channel moved the note by %.2f semitones", tOther);
+  tap(s, "mod_clear");
+  // the status line names the channels the track delivered (no ALSA sequencer in the test: no port)
+  std::string status = get(s, "mpe_status");
+  CHECK(status.find("track: ch 1-2") != std::string::npos, "MPE status: %s", status.c_str());
+  // a patch load keeps the setting
+  seti(s, "patch", 0);
+  tap(s, "patch_load");
+  CHECK(waitLoaded(s), "patch load with MPE on");
+  CHECK(get(s, "mpe") == "1" && get(s, "mpe_bend") == "24", "a patch load keeps MPE: %s %s", get(s, "mpe").c_str(),
+        get(s, "mpe_bend").c_str());
+  printf("ok   MPE: per-note bend %+.1f / %+.1f st (range 48, 24), other channel %+.2f, global channel %+.1f; pressure "
+         "%+.1f (other channel %+.2f); poly aftertouch %+.1f (other key %+.2f); timbre %.1f (other channel %+.2f); "
+         "off: bend %+.1f, global; kept across a patch load\n",
+         b48, b24, other, glob, pOwn, pOther, paOwn, paOther, tHigh - tLow, tOther, d);
+}
+
 void testState(void *s, const char *dataDir) {
   std::string st = get(s, "state");
   CHECK(st.size() > 1000, "state is %zu bytes", st.size());
@@ -370,7 +496,8 @@ void testState(void *s, const char *dataDir) {
   render(t, 1024);
   int diff = 0;
   for (const KeyDef &k : kKeys) {
-    if (k.bind == B_ENGINE && (strstr(k.key, "_prev") || strstr(k.key, "_next") || strstr(k.key, "learn"))) continue;
+    if (k.bind == B_ENGINE && (strstr(k.key, "_prev") || strstr(k.key, "_next") || strstr(k.key, "learn") ||
+                               !strcmp(k.key, "mpe_status"))) continue;   // the status is what this instance has heard
     std::string a = get(s, k.key), b = get(t, k.key);
     if (a != b && !(k.bind == B_CONT && fabs(atof(a.c_str()) - atof(b.c_str())) < 1e-4)) {
       ++diff;
@@ -438,6 +565,7 @@ int main(int argc, char **argv) {
   testWavetables(s, stage);
   testSave(s);
   testMod(s);
+  testMpe(s);
   testState(s, data.c_str());
   E->destroy(s);
   printf(fails ? "FAILED: %d\n" : "PASSED\n", fails);

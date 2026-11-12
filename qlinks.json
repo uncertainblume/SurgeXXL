@@ -1251,6 +1251,20 @@
      "knob": 1,
      "key": "split_key",
      "name": "SPLIT POINT"
+    },
+    {
+     "n": 18,
+     "qlinkPage": 3,
+     "knob": 2,
+     "key": "mpe",
+     "name": "MPE"
+    },
+    {
+     "n": 19,
+     "qlinkPage": 3,
+     "knob": 3,
+     "key": "mpe_bend",
+     "name": "MPE BEND RANGE"
     }
    ]
   }

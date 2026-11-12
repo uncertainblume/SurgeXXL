@@ -40,6 +40,7 @@
 #include "SurgeStorage.h"
 #include "dsp/Effect.h"
 
+#include "alsa_seq.h"
 #include "denormals.h"
 #include "diag.h"
 #include "limiter.h"
@@ -72,7 +73,7 @@ const char *kWtPictures[] = {
 const int kNumWtPictures = sizeof(kWtPictures) / sizeof(kWtPictures[0]);
 
 const float kSampleRate = 44100.0f;
-const char *const kVersion = "0.2.0";
+const char *const kVersion = "0.3.0";
 const uint64_t kGestureFrames = 15435;   // 0.35 s: trigger sets closer than this are one Q-Link turn
 const int kRemovedFx[] = {27};           // Spring Reverb (Surge's fx type number)
 const char *kSlotNames[n_fx_slots] = {"A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4",
@@ -154,6 +155,58 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
   int modSlot = 0;                      // 0-based; == count: a new routing
   int modNewSrc = ms_lfo1;              // the source a new routing gets
   bool learn = false;
+  // Surge's MPE mode and per-note bend range (semitones): the instance's, kept across patch loads, in the state
+  bool mpe = false;
+  int mpeBend = 48;
+  void applyMpe() {
+    synth->mpeEnabled = mpe;
+    synth->storage.mpePitchBendRange = (float)mpeBend;
+  }
+  // a controller that announces its bend range (RPN 0, as the LinnStrument does) sets Surge's: show that one
+  int mpeRange() {
+    float r = synth->storage.mpePitchBendRange;
+    if (r >= 1.f) mpeBend = clampi((int)lroundf(r), 1, 96);
+    return mpeBend;
+  }
+  // The plugin's own MIDI port, "SurgeXXL MIDI In" (src/alsa_seq.h, from the mpc-mpe project). MPC gives a plugin on a
+  // track every note-on on channel 1, so MPE cannot arrive that way; a MIDI track whose output port is this one keeps
+  // each event's channel. Once the port has delivered anything, the track's own MIDI is ignored (no doubled notes).
+  mpe::AlsaMidiPort port;
+  bool portSeen = false;
+  unsigned portMask = 0, trackMask = 0;     // the channels note-ons have arrived on, by each route
+  static std::string channels(unsigned mask) {
+    if (!(mask & 0xffff)) return "none";
+    std::string o;
+    for (int c = 0; c < 16;) {
+      if (!(mask & 1u << c)) { ++c; continue; }
+      int e = c;
+      while (e + 1 < 16 && (mask & 1u << (e + 1))) ++e;
+      char t[16];
+      if (e > c) snprintf(t, sizeof t, "%s%d-%d", o.empty() ? "" : ",", c + 1, e + 1);
+      else snprintf(t, sizeof t, "%s%d", o.empty() ? "" : ",", c + 1);
+      o += t;
+      c = e + 1;
+    }
+    return o;
+  }
+  void noteSeen(unsigned &mask, const uint8_t *m, int n) {
+    if (n > 2 && (m[0] & 0xf0) == 0x90 && m[2]) {
+      unsigned bit = 1u << (m[0] & 15);
+      if (!(mask & bit)) mask |= bit, bump();     // the status line changes
+    }
+  }
+  void readPort() {
+    uint8_t m[3];
+    for (int k = 0, len; k < 1024 && (len = port.read(m)) > 0; ++k) {
+      noteSeen(portMask, m, len);
+      if (!portSeen) {
+        portSeen = true;
+        if (!loading) synth->allNotesOff();       // hand over from the track cleanly
+        bump();
+      }
+      play(m, len);
+    }
+  }
   std::string modMsg;
 
   float outL[BLOCK_SIZE], outR[BLOCK_SIZE];
@@ -242,6 +295,8 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     lim.Init();
     for (int i = 0; i < P_COUNT; ++i) trigLast[i] = 0, trigAt[i] = 0;
     sxxl::Diag::get().log("ready: %d patches, %d wavetables", numPatches(), (int)wtOrder.size());
+    if (!getenv("SXXL_NO_MIDI_PORT")) port.open("SurgeXXL", true, false);
+    sxxl::Diag::get().log("MIDI port: %s", port.isOpen() ? port.clientName() : "none (no ALSA sequencer here)");
     return true;
   }
 
@@ -401,6 +456,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     }
     modSlot = 0;
     learn = false;
+    applyMpe();                         // a patch load never changes the MPE setting
     bump();
   }
 
@@ -605,6 +661,17 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
       case P_FX_SEL: fxPos = clampi((int)lroundf(v), 0, n_fx_slots - 1); bump(); break;
       case P_WT: wtSelectPos((int)lroundf(v)); break;
       case P_PATCH: browse = clampi((int)lroundf(v), 0, std::max(0, numPatches() - 1)); bump(); break;
+      case P_MPE: {
+        bool on = v >= 0.5f;
+        if (on != mpe) {
+          synth->allNotesOff();         // voices started in the other mode would keep the wrong channel handling
+          mpe = on;
+          applyMpe();
+          bump();
+        }
+        break;
+      }
+      case P_MPE_BEND: mpeBend = clampi((int)lroundf(v), 1, 96); applyMpe(); break;
       case P_FX_ON: {
         int bit = 1 << fxSlot();
         int d = patch().fx_disable.val.i;
@@ -725,6 +792,15 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
         return snprintf(buf, len, "%d", pic);
       }
       case P_FX_ON: return snprintf(buf, len, "%d", (patch().fx_disable.val.i >> fxSlot() & 1) ? 0 : 1);
+      case P_MPE: return snprintf(buf, len, "%d", mpe ? 1 : 0);
+      case P_MPE_BEND: return snprintf(buf, len, "%d", mpeRange());
+      case P_MPE_STATUS: {
+        std::string t = port.isOpen() ? std::string(port.clientName()) + " MIDI In: ch " + channels(portMask)
+                                      : std::string("No MIDI port");
+        t += "   |   track: ch " + channels(trackMask);
+        if (portSeen) t += " (ignored)";
+        return put(buf, len, t);
+      }
       case P_SEQ_START: return snprintf(buf, len, "%d", patch().stepsequences[scene()][lfoIndex()].loop_start + 1);
       case P_SEQ_END: return snprintf(buf, len, "%d", patch().stepsequences[scene()][lfoIndex()].loop_end + 1);
       case P_MOD_SLOT: {
@@ -800,8 +876,8 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
 
   // ---- state ----
   int getState(char *buf, int len) {
-    finishLoad(false);
-    if (loading) return 0;
+    finishLoad(true);      // a project saved while a patch loads waits for it (the output is silent meanwhile) rather
+    if (loading) return 0; // than save no state at all
     void *data = nullptr;
     unsigned n = synth->saveRaw(&data);
     char head[96];
@@ -818,6 +894,8 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
         snprintf(t, sizeof t, " %d %d %.6g %llu", q.loop_start, q.loop_end, q.shuffle, (unsigned long long)q.trigmask);
         steps += t;
       }
+    snprintf(t, sizeof t, " MPE %d %d", mpe ? 1 : 0, mpeRange());   // after the steps: older versions stop reading there
+    steps += t;
     std::string s = std::string(head) + b64enc((const unsigned char *)data, n) + " " + steps;
     if ((int)s.size() + 1 > len) return 0;     // never a cut state: the host keeps the last good one
     memcpy(buf, s.c_str(), s.size() + 1);
@@ -831,6 +909,13 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     size_t sp = body.find(" STEPS");
     if (sp != std::string::npos) steps = body.substr(sp + 6), body.resize(sp);
     if (!b64dec(body.c_str(), raw) || raw.empty()) return;
+    {   // a state from before the MPE switch has no MPE section: MPE off, Surge's default range
+      int on = 0, range = 48;
+      size_t mp = steps.rfind(" MPE ");
+      if (mp != std::string::npos) sscanf(steps.c_str() + mp, " MPE %d %d", &on, &range);
+      mpe = on != 0;
+      mpeBend = clampi(range, 1, 96);
+    }
     synth->loadRaw(raw.data(), (int)raw.size(), false);
     osc = clampi(o, 0, n_oscs - 1);
     lfo = clampi(l, 0, 5);
@@ -867,7 +952,13 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
   }
 
   // ---- MIDI ----
-  void midi(const uint8_t *m, int n) {
+  void midi(const uint8_t *m, int n) {         // from the track (the plugin interface)
+    if (n < 1) return;
+    noteSeen(trackMask, m, n);
+    if (portSeen) return;                      // the port has taken over
+    play(m, n);
+  }
+  void play(const uint8_t *m, int n) {
     if (n < 1 || loading) return;              // the load stops every voice anyway
     int st = m[0] & 0xf0, ch = m[0] & 0x0f;
     int d1 = n > 1 ? m[1] & 0x7f : 0, d2 = n > 2 ? m[2] & 0x7f : 0;
@@ -913,6 +1004,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     ScopedDenormalDisable ftz;
     if ((int)bufL.size() < n) bufL.resize(n), bufR.resize(n);
     finishLoad(false);
+    readPort();                                // block resolution: about 3 ms at 128 frames
     if (loading) {                             // silence while the patch loads
       memset(out, 0, sizeof(int16_t) * 2 * n);
       frames += n;
