@@ -94,11 +94,23 @@ pip install ziglang Pillow cairosvg       # plus cmake, ninja and a host gcc
 ./build.sh                                # -> build/package/L'Cronx - VST - SurgeXXL/
 ```
 No Docker. `SXXL_WT_PICTURES=0 ./build.sh` builds without the wavetable pictures (a lighter skin).
+
+### For MPC OS 3.10.1+ (External Plugin Support, every MPC)
+
+`./build.sh --sdk` builds the plugin folder of Akai's [MPC plugin SDK](https://github.com/inmusic-software/mpc-plugin-builder-sdk)
+instead: `build/sdk/L'Cronx - VST - SurgeXXL/` with `plugin.json`, `VST/surgexxl-arm32.so` (MPC X, Live, One, Key,
+Force) and `VST/surgexxl-arm64.so` (MPC Live III, MPC XL), `Plugin Skins/` and Surge's data as `Content/`.
+`SDK_ARCHS=arm64 ./build.sh --sdk` builds one of them only. Copy the folder into `VST2 Plugins` at the root of a
+drive, or install it with the SDK's `tools/mpc_remote.py <ip> add "build/sdk/L'Cronx - VST - SurgeXXL"`; on the MPC,
+Preferences > Enhancements: Enable Enhancements and External Plugin Support. Your files are then in `SurgeXXL` at the
+root of that drive (beside `VST2 Plugins`). The 64-bit build is Surge's engine as it is for aarch64 (NEON, tuned for
+the Cortex-A55 the SDK names); it is tested offline only (`test/run_tests.sh arm64`, the SDK's `host_sim` under
+qemu-aarch64), not yet on a device.
 Releases: mpc-vst-plugins' `tools/release.py` (docs/RELEASING.md there), license `GPL-3.0-or-later`.
 
 ## Testing
 
-`test/run_tests.sh [x86|arm|all] [--patches all|N]`:
+`test/run_tests.sh [x86|arm|arm64|all] [--patches all|N]`:
 - `test/engine_test.cpp`: every parameter answers; continuous and option round trips; every Nth patch (or all) loads
   and plays a chord with bounded output, counting the patches that had a removed FX; every FX type plays; the
   wavetables (picture numbers, a user wavetable added and rescanned); SAVE; the state restored on a second instance;

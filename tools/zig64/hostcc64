@@ -1,0 +1,6 @@
+#!/bin/sh
+# LuaJIT's build tools (minilua, buildvm) must match the target's pointer size: for the 64-bit MPCs they are built as
+# static x86-64 Linux programs (see ../zig/hostcc32 for the Force).
+args=""
+for a in "$@"; do [ "$a" = "-m64" ] || args="$args '$a'"; done
+eval exec ${ZIG:-python3 -m ziglang} cc -target x86_64-linux-musl -static -O2 -fno-sanitize=all -Wno-date-time $args

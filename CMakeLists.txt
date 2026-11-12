@@ -15,7 +15,9 @@ option(SXXL_TESTS "Build the offline tests (desktop host only)" OFF)
 # Surge XT's engine, headless (as Surge's VCV Rack modules build it); see src/VENDORED.md
 set(SURGE_SKIP_JUCE_FOR_RACK ON CACHE BOOL "" FORCE)
 set(SURGE_SKIP_ODDSOUND_MTS ON CACHE BOOL "" FORCE)
-set(SURGE_BUILD_32BIT_LINUX ON CACHE BOOL "" FORCE)
+if(CMAKE_SIZEOF_VOID_P EQUAL 4)   # the 32-bit MPCs and the Force; the 64-bit MPCs (aarch64) build Surge as it is
+  set(SURGE_BUILD_32BIT_LINUX ON CACHE BOOL "" FORCE)
+endif()
 set(SURGE_BUILD_TESTRUNNER OFF CACHE BOOL "" FORCE)
 set(SURGE_SKIP_WERROR ON CACHE BOOL "" FORCE)
 set(SURGE_BUILD_XT OFF CACHE BOOL "" FORCE)
@@ -33,6 +35,9 @@ if(CMAKE_CROSSCOMPILING)
   file(WRITE ${CMAKE_BINARY_DIR}/exports.map "{\n  global: VSTPluginMain;\n  local: *;\n};\n")
   target_link_options(surgexxl PRIVATE -Wl,--no-undefined -Wl,--version-script=${CMAKE_BINARY_DIR}/exports.map
                       -Wl,--gc-sections)
+  # never unmapped: a host that dlclose()s the plugin would leave Surge's exit-time destructors and the crash log's
+  # signal handlers (src/diag.h) pointing at code that is gone (zig links no crtbegin, so dlclose runs no __cxa_finalize)
+  target_link_options(surgexxl PRIVATE -Wl,-z,nodelete)
   # debug sections dropped, the symbol table kept: the crash log (src/diag.h) names functions by offset
   add_custom_command(TARGET surgexxl POST_BUILD COMMAND ${CMAKE_SOURCE_DIR}/tools/zig/zstrip $<TARGET_FILE:surgexxl>)
   target_compile_options(surgexxl PRIVATE -ffunction-sections -fdata-sections)

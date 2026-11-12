@@ -26,6 +26,10 @@
 4. `libs/LuaJitLib/CMakeLists.txt`: with `LUAJIT_DISABLE_JIT` the define also reaches LuaJIT's architecture tests
    (so DynASM gets no `-D JIT`) and the cross-built `buildvm`; upstream's CMake mixes a JIT VM with a no-JIT build.
 
+5. `libs/LuaJitLib/CMakeLists.txt`: DynASM gets `-D ENDIAN_LE` (or `ENDIAN_BE`), as LuaJIT's own Makefile passes it.
+   Without it the aarch64 interpreter (`vm_arm64.dasc`) is assembled for big-endian bytecode and a formula modulator
+   with a branch crashes (found by `engine_test` under qemu-aarch64). The 32-bit ARM VM does not test it.
+
 ### Build settings (CMakeLists.txt, tools/armv7-zig.cmake)
 
 Surge's own options: `SURGE_SKIP_JUCE_FOR_RACK` (the headless engine, as Surge's VCV Rack modules),

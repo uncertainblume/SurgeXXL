@@ -21,6 +21,7 @@
 // Output: Surge's stereo out, through RMXXXL's brickwall limiter (-0.3 dBFS), to MPC's int16.
 // State: the whole Surge patch (Surge's own saveRaw: parameters, modulation, wavetables, step sequences, MSEGs) as
 // base64 text in the plugin chunk, with the page selections in front.
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -210,11 +211,21 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
   // ---- create ----
   bool init(const char *dataDir) {
     std::string data = dataDir ? dataDir : "";
-    // the user folder: "SurgeXXL" next to the folder the plugin's folder is in (<card>/Synths/<plugin>/data)
+    {   // the MPC plugin SDK layout gives "<plugin>/VST/../Content": make it a plain path
+      char real[PATH_MAX];
+      if (!data.empty() && realpath(data.c_str(), real)) data = real;
+    }
+    // the user folder: "SurgeXXL" at the root of the drive. MPC plugin SDK layout: <drive>/VST2 Plugins/<plugin>/Content
+    // (outside the plugin's folder, which an update replaces); the community layout: <card>/Synths/<plugin>/data
     std::string up = data;
-    for (int i = 0; i < 3 && !up.empty(); ++i) {
-      size_t sl = up.find_last_of('/');
-      up = sl == std::string::npos ? "" : up.substr(0, sl);
+    size_t vp = data.rfind("/VST2 Plugins/");
+    if (vp != std::string::npos) {
+      up = data.substr(0, vp);
+    } else {
+      for (int i = 0; i < 3 && !up.empty(); ++i) {
+        size_t sl = up.find_last_of('/');
+        up = sl == std::string::npos ? "" : up.substr(0, sl);
+      }
     }
     userDir = (up.empty() ? std::string(".") : up) + "/SurgeXXL";
     surgeXXLUserDataPath() = userDir;

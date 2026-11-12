@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+- **64-bit MPCs (MPC Live III, MPC XL) and MPC OS 3.10.1's External Plugin Support**: `./build.sh --sdk` builds the
+  plugin folder of Akai's MPC plugin SDK (`plugin.json`, `VST/surgexxl-arm32.so` and `-arm64.so`, `Plugin Skins/`,
+  `Content/`) for a drive's `VST2 Plugins` folder. The user folder is then `SurgeXXL` at the root of that drive.
+- Fixed for aarch64: LuaJIT's interpreter was assembled for big-endian bytecode (the vendored CMake never told DynASM
+  the byte order), so a formula modulator with a branch crashed. Found by `engine_test` under qemu-aarch64.
+- The library is linked `-z nodelete`: a host that unloads the plugin no longer leaves Surge's exit-time destructors
+  and the crash log's signal handlers pointing at unmapped code (a crash at exit in the SDK's `host_sim`).
+- The crash log names pc, lr and sp on aarch64 too. `test/run_tests.sh arm64`.
+
 ## 0.2.0
 - **Fixed: SurgeXXL loaded nothing (or took MPC down when a track switched to it) on every Force.** MPC's service runs
   with no `HOME` variable, and Surge's start-up asked for the home folder before anything else, so no instance could

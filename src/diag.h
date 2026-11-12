@@ -153,6 +153,14 @@ struct Diag {
     p = d.where(p, (uintptr_t)u->uc_mcontext.arm_lr);
     p = str(p, " sp ");
     p = hex(p, (uintptr_t)u->uc_mcontext.arm_sp);
+#elif defined(__aarch64__)
+    const ucontext_t *u = (const ucontext_t *)uc;
+    p = str(p, " pc ");
+    p = d.where(p, (uintptr_t)u->uc_mcontext.pc);
+    p = str(p, " lr ");
+    p = d.where(p, (uintptr_t)u->uc_mcontext.regs[30]);
+    p = str(p, " sp ");
+    p = hex(p, (uintptr_t)u->uc_mcontext.sp);
 #else
     (void)uc;
 #endif

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SurgeXXL's offline tests (no device): the engine test and mpc-vst-plugins' host test, on x86 and, under qemu-arm,
 # as the Force build itself.
-#   test/run_tests.sh [arm|x86|all] [--patches all|N]      (default: arm, the Force binary under qemu)
+#   test/run_tests.sh [arm|arm64|x86|all] [--patches all|N]      (default: arm, the Force binary under qemu)
 # x86 needs cmake, ninja and a host compiler; arm needs build.sh's toolchain (zig) plus qemu-user and an armhf glibc
 # (Debian/Ubuntu: apt install qemu-user libc6-armhf-cross). The stage (test/stage.sh) is a card with the plugin's data
 # folder; the user folder (SurgeXXL/) is emptied before each run.
@@ -42,6 +42,17 @@ if [ "$WHICH" = x86 ] || [ "$WHICH" = all ]; then
   crash_log x86 $NOHOME build/x86/engine_test
   cp build/x86/host_test "$STAGE/Synths/plugin/host_test"
   (cd "$STAGE/Synths/plugin" && $NOHOME ./host_test)
+fi
+if [ "$WHICH" = arm64 ]; then   # the 64-bit MPCs' build (apt install qemu-user libc6-arm64-cross)
+  cmake -S . -B build/arm64 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$PWD/tools/aarch64-zig.cmake" \
+    -DSXXL_TESTS=ON >/dev/null
+  ninja -C build/arm64 engine_test host_test
+  rm -rf "$STAGE/SurgeXXL"
+  QEMU="qemu-aarch64 -cpu cortex-a55 -L /usr/aarch64-linux-gnu"
+  $NOHOME $QEMU build/arm64/engine_test "$STAGE" "${PATCHES[@]}" --fx
+  crash_log arm64 $NOHOME $QEMU build/arm64/engine_test
+  cp build/arm64/host_test "$STAGE/Synths/plugin/host_test_arm64"
+  (cd "$STAGE/Synths/plugin" && $NOHOME $QEMU ./host_test_arm64)
 fi
 if [ "$WHICH" = arm ] || [ "$WHICH" = all ]; then
   cmake -S . -B build/arm -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$PWD/tools/armv7-zig.cmake" \
