@@ -9,8 +9,10 @@ Plugins. About 450 MB unpacked.
 - Fixed: a crash when a host unloads the plugin.
 - Your patches and wavetables are in `SurgeXXL` at the root of the drive.
 
-Tested offline only (the engine test and the SDK's validator and host simulator, under an emulator). Not yet
-confirmed on a device: save your project before loading it. MPE mode has no switch yet; see the README.
+**Experimental: not fully tested, and it may have major usability problems.** The checks ran offline, under an
+emulator; it has had very little use on real hardware. A plugin fault can take the MPC down, so save your project
+before loading it. Known problems: patches can only be browsed one at a time or by category on the PATCH page (they
+are not MPC presets), and MPE mode has no switch yet. See the README.
 
 SurgeXXL is by L'Cronx (https://github.com/sunskiefer/SurgeXXL). Surge XT is by the Surge Synth Team.
 GPL-3.0-or-later; free, not to be sold.

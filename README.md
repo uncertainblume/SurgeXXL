@@ -30,18 +30,39 @@ has got, which is not all the way yet.
 
 ## Status
 
-> [!NOTE]
-> **Built and tested offline. Not yet confirmed on a device in this form.** Both libraries pass the original
-> project's engine test and the SDK's validator. The SDK's host simulator still reports four selector parameters
-> that do not read back after a state restore (see [Testing](#testing)). Third-party plugins have no crash
-> protection on the MPC: save your project before you load it, and please report what you find under Issues.
+> [!WARNING]
+> **Experimental. Not fully tested, and it may have major usability problems.** Treat this as an early test build,
+> not a finished instrument.
+>
+> - It has had very little use on real hardware. The checks behind it ran offline, under an emulator.
+> - Third-party plugins have no crash protection on the MPC. A fault in the plugin can take the MPC down and lose
+>   unsaved work. **Save your project before you load it**, and do not use it in a session you cannot afford to lose.
+> - The pages and Q-Link layout were designed for the Akai Force. How well they work on other MPCs is not known.
+> - Some things are awkward or missing; see [Known problems](#known-problems).
+
+Both libraries pass the original project's engine test and the SDK's validator. The SDK's host simulator still
+reports four selector parameters that do not read back after a state restore (see [Testing](#testing)). Please
+report what you find under Issues.
 
 | | |
 |---|---|
 | Runs on | MPC OS **3.10.1 or later**. 64-bit: MPC Live III, MPC XL. 32-bit: MPC X, X SE, Live, Live II, One, One+, Key 61, Key 37, Force |
 | Package | `L'Cronx - VST - SurgeXXL/`, about 450 MB unpacked (Surge's whole patch and wavetable library is inside) |
 | Engine | Surge XT 1.3.4, unchanged, with 3008 patches and 761 wavetables |
-| Tested on a device | The original 0.2.0 on an Akai Force (firmware 3.9.1, community loader). This SDK package: not yet |
+| Tested on a device | The original 0.2.0 on an Akai Force (firmware 3.9.1, community loader). This SDK package: barely; see the warning above |
+
+## Known problems
+
+- **Browsing patches is slow.** Surge's 3008 patches are not offered as MPC presets, so the MPC's own preset list
+  is empty. The only way to them is the PATCH page (the last tab): `<` and `>` step one patch at a time, `CAT`
+  jumps to the next or previous category, and the PATCH Q-Link turns through the list; then press `LOAD`. There is
+  no list view and no search. Finding one sound among thousands this way is tedious.
+- **No MPE switch yet.** See [MPE](#mpe).
+- **Tested on almost no hardware.** Voice counts and CPU load on each MPC model are unmeasured.
+- **A large package.** About 450 MB on the drive, and it can be slow to copy and to scan.
+- **State restore of four selector parameters** is flagged by the SDK's host simulator (see [Testing](#testing)).
+
+If you hit something else, it is probably not you. Open an Issue.
 
 ## Install
 
