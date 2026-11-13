@@ -267,6 +267,25 @@ P += [
     readout("mpe_status", "MPE Status"),
 ]
 
+
+# ---- 0.3.1: MPC's PRESET menu ------------------------------------------------------------------------------------------
+# One VST program per entry (vst.json "programs"): 0 is the PATCH page's own sound, then each folder of PRESET_ROOT as a
+# heading followed by its patches, in Surge's order. src/engine.cpp builds the same list from Surge's patch list.
+PRESET_ROOT = "LinnStrument MPE"
+
+
+def preset_count():
+    root = os.path.join(ROOT, "third_party", "surge", "resources", "data", "patches_3rdparty", PRESET_ROOT)
+    n = 1
+    for _, _, files in os.walk(root):
+        k = sum(1 for f in files if f.lower().endswith(".fxp"))
+        if k:
+            n += 1 + k
+    return n
+
+
+P += [eng_num("preset", "Preset", 0, preset_count() - 1, 0, display="int", poll=False)]
+
 # ---- checks --------------------------------------------------------------------------------------------------------
 keys = [p["key"] for p in P]
 assert len(keys) == len(set(keys)), "duplicate key"

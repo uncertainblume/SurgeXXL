@@ -6,7 +6,7 @@ on:
     tags: ['sdk-v*']
   workflow_dispatch:
     inputs:
-      tag: { description: 'Release tag, e.g. sdk-v0.3.0', required: true }
+      tag: { description: 'Release tag, e.g. sdk-v0.3.1', required: true }
 permissions:
   contents: write
 jobs:
@@ -18,7 +18,7 @@ jobs:
         env: { INPUT_TAG: '${{ github.event.inputs.tag }}' }
         run: |
           t="$INPUT_TAG"; [ -n "$t" ] || t="$GITHUB_REF_NAME"
-          case "$t" in sdk-v[0-9]*) ;; *) echo "tag must look like sdk-v0.3.0, not '$t'"; exit 1 ;; esac
+          case "$t" in sdk-v[0-9]*) ;; *) echo "tag must look like sdk-v0.3.1, not '$t'"; exit 1 ;; esac
           echo "TAG=$t" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with: { submodules: recursive }

@@ -2,7 +2,7 @@
   "name": "SurgeXXL",
   "vendor": "L'Cronx",
   "uid": "AnSx",
-  "version": 1004,
+  "version": 1005,
   "so": "surgexxl.so",
   "params": "params.json",
   "layout": "layout.conf",
@@ -15,5 +15,8 @@
     "PARAM_TEXT_MAX": 64,
     "MODULE_SUBDIR": "\"data\"",
     "CHUNK_MAX": 4194304
+  },
+  "programs": {
+    "param": "preset"
   }
 }

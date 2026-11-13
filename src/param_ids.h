@@ -192,4 +192,5 @@
 #define P_MPE 189
 #define P_MPE_BEND 190
 #define P_MPE_STATUS 191
-#define P_COUNT 192
+#define P_PRESET 192
+#define P_COUNT 193

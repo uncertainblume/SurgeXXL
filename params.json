@@ -1877,6 +1877,16 @@
    "default": 0.0,
    "display": "string",
    "type": "readout"
+  },
+  {
+   "key": "preset",
+   "name": "Preset",
+   "min": 0,
+   "max": 75,
+   "default": 0,
+   "dynamic_display": true,
+   "display": "int",
+   "poll": false
   }
  ]
 }

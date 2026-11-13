@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1
+The LinnStrument MPE patches in MPC's PRESET menu. Built and tested offline; not yet tried on an MPC.
+- **76 VST programs** (vst.json `"programs"`, the new `preset` parameter): entry 0 is the PATCH page's own sound, then
+  each of Surge's 12 LinnStrument MPE folders as a heading followed by its patches (63). Picking a patch loads it as
+  LOAD does; entry 0 and the headings do nothing.
+- The entry is in the state, so MPC re-selecting the saved program when a project loads does not reload the factory
+  patch over the restored sound. A patch loaded from the PATCH page that is not in the menu shows entry 0.
+- One parameter appended (`preset`): 0.2.0 and 0.3.0 projects load unchanged.
+- `engine_test`: the menu's length against the parameter's range, its order, a heading, the first and last patches,
+  the entry across a state restore, a PATCH page load.
+- 0.3.0's MPE had its first device test: per-note bends and polyphonic aftertouch came through on an MPC Live III
+  with a LinnStrument (Surge's LinnStrument MPE "Bell Piano"), with some audio glitches.
+
 ## 0.3.0
 MPE. Built and tested offline; not yet confirmed on an MPC.
 - **MPE switch and MPE Bend Range** (1-96 semitones, 48 by default) on the PATCH page and Q-Link page PATCH 3. With

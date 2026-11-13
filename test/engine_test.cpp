@@ -488,6 +488,56 @@ void testMpe(void *s) {
          b48, b24, other, glob, pOwn, pOther, paOwn, paOther, tHigh - tLow, tOther, d);
 }
 
+// MPC's PRESET menu: the "preset" parameter is the VST program (vst.json "programs"); the wrapper names entry n by
+// get("preset:<n>") and selects it by set("preset", n).
+void testPresets(void *s, const char *dataDir) {
+  int n = 0, heads = 0;
+  std::string first, firstHead;
+  for (;; ++n) {
+    char k[32];
+    snprintf(k, sizeof k, "preset:%d", n);
+    std::string name = get(s, k);
+    if (name.empty()) break;
+    if (name.compare(0, 3, "== ") == 0) { ++heads; if (firstHead.empty()) firstHead = name; }
+    else if (n > 0 && first.empty()) first = name;
+  }
+  int want = (int)kKeys[P_PRESET].hi + 1;
+  CHECK(n == want, "the PRESET menu has %d entries, the parameter's range says %d", n, want);
+  CHECK(get(s, "preset:0") == "- Patch page -", "entry 0: %s", get(s, "preset:0").c_str());
+  CHECK(heads == 12, "%d folder headings (LinnStrument MPE has 12 folders)", heads);
+  CHECK(n - 1 - heads == 63, "%d patches (LinnStrument MPE has 63)", n - 1 - heads);
+  seti(s, "preset", 1);                       // a heading: nothing happens
+  render(s, 256);
+  std::string before = get(s, "patch_name");
+  CHECK(get(s, "preset") != "1", "a heading is not selectable: preset %s", get(s, "preset").c_str());
+  seti(s, "preset", 2);                       // the first patch of the first folder
+  CHECK(waitLoaded(s), "preset 2 loads");
+  CHECK(get(s, "preset") == "2" && get(s, "patch_name") == first, "preset 2 loaded %s (want %s), preset reads %s",
+        get(s, "patch_name").c_str(), first.c_str(), get(s, "preset").c_str());
+  Audio a;
+  note(s, 60, 100);
+  render(s, 22050, &a);
+  note(s, 60, 0);
+  CHECK(a.peak > 1e-3 && a.finite, "the preset plays (peak %.4f)", a.peak);
+  // the last entry, and the project state keeps the entry
+  seti(s, "preset", n - 1);
+  CHECK(waitLoaded(s), "the last preset loads");
+  std::string last = get(s, "patch_name");
+  void *t = E->create(dataDir);
+  set(t, "state", get(s, "state").c_str());
+  render(t, 1024);
+  CHECK(get(t, "preset") == get(s, "preset") && get(t, "patch_name") == last, "state keeps the preset: %s %s",
+        get(t, "preset").c_str(), get(t, "patch_name").c_str());
+  E->destroy(t);
+  // a patch loaded from the PATCH page that is not in the menu: entry 0
+  seti(s, "patch", 0);
+  tap(s, "patch_load");
+  CHECK(waitLoaded(s), "a PATCH page load");
+  CHECK(get(s, "preset") == "0", "after a PATCH page load of another patch the preset is %s", get(s, "preset").c_str());
+  printf("ok   PRESET menu: %d entries (%d folders, %d patches), first %s / %s, last %s; headings do nothing; kept in "
+         "the state\n", n, heads, n - 1 - heads, firstHead.c_str(), first.c_str(), last.c_str());
+}
+
 void testState(void *s, const char *dataDir) {
   std::string st = get(s, "state");
   CHECK(st.size() > 1000, "state is %zu bytes", st.size());
@@ -566,6 +616,7 @@ int main(int argc, char **argv) {
   testSave(s);
   testMod(s);
   testMpe(s);
+  testPresets(s, data.c_str());
   testState(s, data.c_str());
   E->destroy(s);
   printf(fails ? "FAILED: %d\n" : "PASSED\n", fails);

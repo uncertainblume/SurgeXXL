@@ -73,7 +73,7 @@ const char *kWtPictures[] = {
 const int kNumWtPictures = sizeof(kWtPictures) / sizeof(kWtPictures[0]);
 
 const float kSampleRate = 44100.0f;
-const char *const kVersion = "0.3.0";
+const char *const kVersion = "0.3.1";
 const uint64_t kGestureFrames = 15435;   // 0.35 s: trigger sets closer than this are one Q-Link turn
 const int kRemovedFx[] = {27};           // Spring Reverb (Surge's fx type number)
 const char *kSlotNames[n_fx_slots] = {"A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4",
@@ -338,8 +338,52 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
       if (st.wt_list[id].category >= st.firstUserWTCategory) wtOrder.push_back(id);
     for (int id : st.wtOrdering)
       if (st.wt_list[id].category < st.firstUserWTCategory) wtOrder.push_back(id);
+    makePresets();
   }
   int numPatches() { return (int)patchOrder.size(); }
+  // MPC's PRESET menu (VST programs, the "preset" parameter): entry 0 is the PATCH page's own sound; then each folder
+  // of kPresetRoot as a heading (id -1) followed by its patches, in Surge's order. tools/gen_params.py counts the same.
+  struct Preset { int id; std::string name; };
+  std::vector<Preset> presets;
+  int prog = 0;                         // the entry the sound was loaded from (0: the PATCH page or a restored state)
+  void makePresets() {
+    static const char kPresetRoot[] = "LinnStrument MPE";
+    auto &st = synth->storage;
+    presets.clear();
+    presets.push_back({-1, "- Patch page -"});
+    std::vector<std::pair<std::string, std::vector<int>>> folders;      // folder name -> its patches, in Surge's order
+    for (int id : st.patchOrdering) {
+      int cat = st.patch_list[id].category;
+      if (cat < st.firstThirdPartyCategory || cat >= st.firstUserCategory) continue;
+      std::string cn = st.patch_category[cat].name;
+      for (auto &c : cn) if (c == '\\') c = '/';
+      if (cn.compare(0, sizeof kPresetRoot - 1, kPresetRoot) != 0) continue;
+      size_t sl = cn.find_last_of('/');
+      std::string folder = sl == std::string::npos ? cn : cn.substr(sl + 1);
+      auto it = std::find_if(folders.begin(), folders.end(), [&](const auto &f) { return f.first == folder; });
+      if (it == folders.end()) folders.push_back({folder, {}}), it = folders.end() - 1;
+      it->second.push_back(id);
+    }
+    std::sort(folders.begin(), folders.end(), [](const auto &x, const auto &y) { return x.first < y.first; });
+    for (auto &f : folders) {
+      presets.push_back({-1, "== " + f.first + " =="});
+      for (int id : f.second) presets.push_back({id, st.patch_list[id].name});
+    }
+  }
+  int presetOf(int id) {
+    for (size_t i = 1; i < presets.size(); ++i)
+      if (presets[i].id == id) return (int)i;
+    return 0;
+  }
+  void selectPreset(int k) {
+    if (k < 1 || k >= (int)presets.size() || presets[k].id < 0 || loading) return;   // 0 and the headings do nothing
+    for (int pos = 0; pos < numPatches(); ++pos)
+      if (patchOrder[pos] == presets[k].id) {
+        browse = pos;
+        loadBrowsed();
+        return;
+      }
+  }
   int patchAt(int pos) {
     auto &o = patchOrder;
     if (o.empty()) return -1;
@@ -354,6 +398,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
   void loadBrowsed() {
     int id = patchAt(browse);
     if (id < 0 || loading) return;
+    prog = presetOf(id);
     loadedPath = synth->storage.patch_list[id].path.generic_string();
     loadedName = synth->storage.patch_list[id].name;
     joinLoader();
@@ -672,6 +717,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
         break;
       }
       case P_MPE_BEND: mpeBend = clampi((int)lroundf(v), 1, 96); applyMpe(); break;
+      case P_PRESET: selectPreset((int)lroundf(v)); break;
       case P_FX_ON: {
         int bit = 1 << fxSlot();
         int d = patch().fx_disable.val.i;
@@ -727,6 +773,13 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     buf[0] = 0;
     if (!strcmp(key, "display_rev")) return snprintf(buf, len, "%u", rev);
     if (!strcmp(key, "state")) return getState(buf, len);
+    if (!strncmp(key, "preset", 6)) {           // MPC's PRESET menu: answered at once, also while a patch loads
+      if (!key[6]) return snprintf(buf, len, "%d", prog);
+      if (key[6] == ':') {
+        int k = atoi(key + 7);
+        return k >= 0 && k < (int)presets.size() ? put(buf, len, presets[k].name) : 0;
+      }
+    }
     finishLoad(false);
     if (loading) {                             // the last answers, until the load is done
       if (!strncmp(key, "patch_name", 10)) return put(buf, len, "Loading...");
@@ -894,6 +947,8 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
         snprintf(t, sizeof t, " %d %d %.6g %llu", q.loop_start, q.loop_end, q.shuffle, (unsigned long long)q.trigmask);
         steps += t;
       }
+    snprintf(t, sizeof t, " PRG %d", prog);     // the PRESET menu's entry: MPC re-selects it when the project loads
+    steps += t;
     snprintf(t, sizeof t, " MPE %d %d", mpe ? 1 : 0, mpeRange());   // after the steps: older versions stop reading there
     steps += t;
     std::string s = std::string(head) + b64enc((const unsigned char *)data, n) + " " + steps;
@@ -915,6 +970,10 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
       if (mp != std::string::npos) sscanf(steps.c_str() + mp, " MPE %d %d", &on, &range);
       mpe = on != 0;
       mpeBend = clampi(range, 1, 96);
+      int pr = 0;
+      size_t pp = steps.rfind(" PRG ");
+      if (pp != std::string::npos) sscanf(steps.c_str() + pp, " PRG %d", &pr);
+      prog = pr >= 0 && pr < (int)presets.size() ? pr : 0;
     }
     synth->loadRaw(raw.data(), (int)raw.size(), false);
     osc = clampi(o, 0, n_oscs - 1);
