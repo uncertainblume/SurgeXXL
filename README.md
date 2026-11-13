@@ -236,11 +236,10 @@ as Akai is concerned too: read the warning the MPC shows when you turn External 
 - **L'Cronx**, for [SurgeXXL](https://github.com/sunskiefer/SurgeXXL). This fork is a repackaging of their
   instrument.
 - **The Surge Synth Team** and every contributor to Surge XT, and Claes Johanson, who wrote Surge and gave it away.
-- **Roger Linn**, for the LinnStrument, and for a lifetime of instruments, the MPC among them.
-- **Geert Bevin**, for the LinnStrument's firmware and for his work on MPE.
 - **Akai Professional and inMusic**, for opening the MPC to third-party plugins and publishing the SDK.
 - **sd88me** and the mpc-vst-plugins contributors, whose wrapper and skin builder this plugin is built on.
-- **Wendy Carlos**, to whom this is dedicated.
+- **Roger Linn and Geert Bevin**, creators of MPE and the Linnstrument, and **Wendy Carlos**, the pioneer without
+  whom none of this would be possible. This is dedicated to the three of them.
 
 ---
 
