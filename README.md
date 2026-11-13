@@ -6,7 +6,8 @@
 hardware, packaged the official way: for MPC OS 3.10.1's External Plugin Support, built to Akai's
 [MPC plugin SDK](https://github.com/inmusic-software/mpc-plugin-builder-sdk).**
 
-*Dedicated to Wendy Carlos, the pioneer without whom none of this would be possible.*
+*Dedicated to Roger Linn and Geert Bevin, creators of MPE and the Linnstrument, and to Wendy Carlos, the pioneer without
+whom none of this would be possible.*
 
 This is a fork of [SurgeXXL](https://github.com/sunskiefer/SurgeXXL) by **L'Cronx**, who did the real work: they
 put Surge XT 1.3.4's sound engine on the Akai Force, drew its eight pages, mapped every control to the Q-Links and
