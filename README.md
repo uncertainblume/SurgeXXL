@@ -154,6 +154,10 @@ New in 0.3.0. **First test on a device: it works.** On an MPC Live III with a Li
 LinnStrument MPE "Bell Piano" patch, per-note bends and polyphonic aftertouch came through. That is one device, one
 controller and one sitting, with some audio glitches; everything else below is still as tested offline.
 
+In that test the LinnStrument went **straight into the plugin track**, with no MIDI track and no port in between.
+So on MPC OS 3.10.1, at least on that device, the MPC does hand this plugin each note's channel. That is the
+simplest set-up and the one to try first. The port route below is the fallback if notes all bend together.
+
 ### What is there
 
 - **An MPE switch** on the PATCH page (the last tab), with a **Bend Range** control beside it (1 to 96 semitones,
@@ -185,7 +189,11 @@ plugin is loaded again.
 
 ### Setting it up with a LinnStrument
 
-On the MPC:
+The simple way (the one that has worked on a device): add a **plugin track** with SurgeXXL, set the track's MIDI
+input to the LinnStrument with Input Channel **All**, turn **MPE** on on the PATCH page, load a patch from the
+**LinnStrument MPE** folders, and play.
+
+If every note bends together that way, use the plugin's own port instead. On the MPC:
 
 1. Preferences > MIDI / Sync > Input Ports, the LinnStrument's row: **Track** on, **Global** off.
 2. Add a **plugin track** with SurgeXXL. On its PATCH page turn **MPE** on.
@@ -198,7 +206,8 @@ On the LinnStrument (Per-Split Settings): MIDI Mode **ChPerNote**, Main channel 
 Range **48**, Timbre/Y **CC 74**, Loudness/Z **Channel Pressure** (Poly Pressure also works). Holding the ChPerNote
 button sets the firmware's MPE setup in one go.
 
-Then read the status line. `SurgeXXL MIDI In: ch 2-8` (or however many channels you play) is right. `ch 1` only
+Then read the status line. `track: ch 2-8` (the simple way) or `SurgeXXL MIDI In: ch 2-8` (the port), or however
+many channels you play, is right. `ch 1` only
 means the channels were flattened on the way: check Input Channel All and Output Channel Any. `No MIDI port` means
 the MPC did not let the plugin open a port. mpc-mpe's
 [routing guide](https://github.com/uncertainblume/mpc-mpe/blob/main/docs/routing-guide.md) has more recipes and a
