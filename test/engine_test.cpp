@@ -539,6 +539,18 @@ void testPresets(void *s, const char *dataDir) {
 }
 
 void testState(void *s, const char *dataDir) {
+  {   // how long the host's "give me your state" call takes: autosave makes it while the audio keeps running
+    double worst = 0, sum = 0;
+    for (int i = 0; i < 5; ++i) {
+      double t0 = now();
+      std::string x = get(s, "state");
+      double d = (now() - t0) * 1000;
+      sum += d;
+      if (d > worst) worst = d;
+    }
+    printf("     state call: %.1f ms on average, %.1f ms at worst (the wrapper holds its engine lock for all of it)\n",
+           sum / 5, worst);
+  }
   std::string st = get(s, "state");
   CHECK(st.size() > 1000, "state is %zu bytes", st.size());
   void *t = E->create(dataDir);
