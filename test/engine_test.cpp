@@ -504,8 +504,12 @@ void testPresets(void *s, const char *dataDir) {
   int want = (int)kKeys[P_PRESET].hi + 1;
   CHECK(n == want, "the PRESET menu has %d entries, the parameter's range says %d", n, want);
   CHECK(get(s, "preset:0") == "- Patch page -", "entry 0: %s", get(s, "preset:0").c_str());
-  CHECK(heads == 12, "%d folder headings (LinnStrument MPE has 12 folders)", heads);
-  CHECK(n - 1 - heads == 63, "%d patches (LinnStrument MPE has 63)", n - 1 - heads);
+  CHECK(get(s, "preset:1") == "== MPE: Basses ==", "entry 1 (the 0.3.1 list keeps its place): %s", get(s, "preset:1").c_str());
+  CHECK(get(s, "preset:2") == "Bass Guitar", "entry 2: %s", get(s, "preset:2").c_str());
+  CHECK(get(s, "preset:75") == "Ocarina", "entry 75 (the last of the 0.3.1 list): %s", get(s, "preset:75").c_str());
+  CHECK(heads == 12 + 15, "%d headings (12 LinnStrument MPE folders, 15 factory folders)", heads);
+  CHECK(n - 1 - heads == 63 + 609, "%d patches (63 LinnStrument MPE + 609 factory, Templates and Tutorials left out)",
+        n - 1 - heads);
   seti(s, "preset", 1);                       // a heading: nothing happens
   render(s, 256);
   std::string before = get(s, "patch_name");
@@ -538,6 +542,33 @@ void testPresets(void *s, const char *dataDir) {
          "the state\n", n, heads, n - 1 - heads, firstHead.c_str(), first.c_str(), last.c_str());
 }
 
+// Auto Load: the browsed patch loads by itself once the choice has settled, and not before
+void testAutoload(void *s) {
+  seti(s, "autoload", 1);
+  CHECK(get(s, "autoload") == "1", "Auto Load is on");
+  std::string was = get(s, "patch_name");
+  tap(s, "patch_next");
+  std::string pick = get(s, "patch_browse");
+  CHECK(pick != was, "next patch browsed: %s", pick.c_str());
+  render(s, 4410);                            // 0.1 s: still settling
+  CHECK(get(s, "patch_name") == was, "nothing loaded yet: %s", get(s, "patch_name").c_str());
+  tap(s, "patch_next");                       // changes again: the wait starts over
+  std::string pick2 = get(s, "patch_browse");
+  render(s, 8820);                            // 0.2 s after the second step
+  CHECK(get(s, "patch_name") == was, "still nothing loaded: %s", get(s, "patch_name").c_str());
+  render(s, 8820);
+  CHECK(waitLoaded(s), "the auto load finishes");
+  CHECK(get(s, "patch_name") == pick2, "loaded %s after the choice settled (want %s)", get(s, "patch_name").c_str(),
+        pick2.c_str());
+  seti(s, "autoload", 0);
+  tap(s, "patch_next");
+  render(s, 44100);
+  CHECK(get(s, "patch_name") == pick2, "Auto Load off: nothing loads by itself (%s)", get(s, "patch_name").c_str());
+  seti(s, "autoload", 1);
+  printf("ok   Auto Load: %s -> %s after the choice settled; nothing loaded early or with the switch off\n", was.c_str(),
+         pick2.c_str());
+}
+
 void testState(void *s, const char *dataDir) {
   {   // how long the host's "give me your state" call takes: autosave makes it while the audio keeps running
     double worst = 0, sum = 0;
@@ -560,6 +591,9 @@ void testState(void *s, const char *dataDir) {
   for (const KeyDef &k : kKeys) {
     if (k.bind == B_ENGINE && (strstr(k.key, "_prev") || strstr(k.key, "_next") || strstr(k.key, "learn") ||
                                !strcmp(k.key, "mpe_status"))) continue;   // the status is what this instance has heard
+    // a patch with no wavetable has no table position: the browse position is then whatever was left from before
+    if (get(s, "wt_name").empty() && (!strcmp(k.key, "wt") || !strcmp(k.key, "wt_folder") || !strcmp(k.key, "wt_pic")))
+      continue;
     std::string a = get(s, k.key), b = get(t, k.key);
     if (a != b && !(k.bind == B_CONT && fabs(atof(a.c_str()) - atof(b.c_str())) < 1e-4)) {
       ++diff;
@@ -610,6 +644,7 @@ int main(int argc, char **argv) {
   void *s = E->create(data.c_str());
   CHECK(s, "create");
   if (!s) return 1;
+  seti(s, "autoload", 0);                     // the tests load patches themselves; testAutoload turns it on
   if (argc > 2 && !strcmp(argv[2], "--crash")) {   // the crash log's own test: run_tests.sh reads the log after
     render(s, 128);
     set(s, "test_crash", "1");
@@ -629,6 +664,7 @@ int main(int argc, char **argv) {
   testMod(s);
   testMpe(s);
   testPresets(s, data.c_str());
+  testAutoload(s);
   testState(s, data.c_str());
   E->destroy(s);
   printf(fails ? "FAILED: %d\n" : "PASSED\n", fails);

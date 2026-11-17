@@ -73,7 +73,7 @@ const char *kWtPictures[] = {
 const int kNumWtPictures = sizeof(kWtPictures) / sizeof(kWtPictures[0]);
 
 const float kSampleRate = 44100.0f;
-const char *const kVersion = "0.3.1";
+const char *const kVersion = "0.3.2";
 const uint64_t kGestureFrames = 15435;   // 0.35 s: trigger sets closer than this are one Q-Link turn
 const int kRemovedFx[] = {27};           // Spring Reverb (Surge's fx type number)
 const char *kSlotNames[n_fx_slots] = {"A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4",
@@ -171,6 +171,11 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
   // The plugin's own MIDI port, "SurgeXXL MIDI In" (src/alsa_seq.h, from the mpc-mpe project). MPC gives a plugin on a
   // track every note-on on channel 1, so MPE cannot arrive that way; a MIDI track whose output port is this one keeps
   // each event's channel. Once the port has delivered anything, the track's own MIDI is ignored (no doubled notes).
+  // Auto Load (0.3.2): a patch chosen on the PATCH page (the buttons, CAT, or the PATCH knob) loads once the choice has
+  // stopped changing for 0.3 s, so there is no LOAD press; stepping through the list does not load every stop.
+  bool autoload = true;
+  uint64_t autoloadAt = 0;              // the frame at which to load the browsed patch (0: none pending)
+  void browsed() { if (autoload) autoloadAt = frames + 13230; }
   mpe::AlsaMidiPort port;
   bool portSeen = false;
   unsigned portMask = 0, trackMask = 0;     // the channels note-ons have arrived on, by each route
@@ -341,34 +346,49 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     makePresets();
   }
   int numPatches() { return (int)patchOrder.size(); }
-  // MPC's PRESET menu (VST programs, the "preset" parameter): entry 0 is the PATCH page's own sound; then each folder
-  // of kPresetRoot as a heading (id -1) followed by its patches, in Surge's order. tools/gen_params.py counts the same.
+  // MPC's PRESET menu (VST programs, the "preset" parameter): entry 0 is the PATCH page's own sound; then groups, each a
+  // heading (id -1) followed by its patches in Surge's order: first the LinnStrument MPE folders (the 0.3.1 list, same
+  // order and positions, so projects saved with it keep their entry), then Surge's factory folders but Templates and
+  // Tutorials. tools/gen_params.py preset_count() counts the same.
   struct Preset { int id; std::string name; };
   std::vector<Preset> presets;
   int prog = 0;                         // the entry the sound was loaded from (0: the PATCH page or a restored state)
   void makePresets() {
-    static const char kPresetRoot[] = "LinnStrument MPE";
+    static const char kMpeRoot[] = "LinnStrument MPE";
     auto &st = synth->storage;
     presets.clear();
     presets.push_back({-1, "- Patch page -"});
-    std::vector<std::pair<std::string, std::vector<int>>> folders;      // folder name -> its patches, in Surge's order
+    typedef std::vector<std::pair<std::string, std::vector<int>>> Groups;   // folder name -> its patches, Surge's order
+    Groups mpe, factory;
+    auto add = [](Groups &g, const std::string &folder, int id) {
+      auto it = std::find_if(g.begin(), g.end(), [&](const auto &f) { return f.first == folder; });
+      if (it == g.end()) g.push_back({folder, {}}), it = g.end() - 1;
+      it->second.push_back(id);
+    };
     for (int id : st.patchOrdering) {
       int cat = st.patch_list[id].category;
-      if (cat < st.firstThirdPartyCategory || cat >= st.firstUserCategory) continue;
+      if (cat >= st.firstUserCategory) continue;
       std::string cn = st.patch_category[cat].name;
       for (auto &c : cn) if (c == '\\') c = '/';
-      if (cn.compare(0, sizeof kPresetRoot - 1, kPresetRoot) != 0) continue;
-      size_t sl = cn.find_last_of('/');
-      std::string folder = sl == std::string::npos ? cn : cn.substr(sl + 1);
-      auto it = std::find_if(folders.begin(), folders.end(), [&](const auto &f) { return f.first == folder; });
-      if (it == folders.end()) folders.push_back({folder, {}}), it = folders.end() - 1;
-      it->second.push_back(id);
+      if (cat >= st.firstThirdPartyCategory) {
+        if (cn.compare(0, sizeof kMpeRoot - 1, kMpeRoot) != 0) continue;
+        size_t sl = cn.find_last_of('/');
+        add(mpe, sl == std::string::npos ? cn : cn.substr(sl + 1), id);
+      } else {
+        std::string top = cn.substr(0, cn.find('/'));
+        if (top == "Templates" || top == "Tutorials") continue;
+        add(factory, top, id);
+      }
     }
-    std::sort(folders.begin(), folders.end(), [](const auto &x, const auto &y) { return x.first < y.first; });
-    for (auto &f : folders) {
-      presets.push_back({-1, "== " + f.first + " =="});
-      for (int id : f.second) presets.push_back({id, st.patch_list[id].name});
-    }
+    auto emit = [&](Groups &g, const char *prefix) {
+      std::sort(g.begin(), g.end(), [](const auto &x, const auto &y) { return x.first < y.first; });
+      for (auto &f : g) {
+        presets.push_back({-1, std::string("== ") + prefix + f.first + " =="});
+        for (int id : f.second) presets.push_back({id, st.patch_list[id].name});
+      }
+    };
+    emit(mpe, "MPE: ");
+    emit(factory, "");
   }
   int presetOf(int id) {
     for (size_t i = 1; i < presets.size(); ++i)
@@ -461,6 +481,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
       while (pos > 0 && pl[patchAt(pos - 1)].category == c) --pos;     // its first patch
     }
     browse = pos;
+    browsed();
     bump();
   }
   void savePatch() {
@@ -641,8 +662,8 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
       case P_WT_CAT_PREV: wtStepFolder(-1); break;
       case P_WT_CAT_NEXT: wtStepFolder(1); break;
       case P_WT_RESCAN: wtRescan(); break;
-      case P_PATCH_PREV: browse = clampi(browse - 1, 0, numPatches() - 1); bump(); break;
-      case P_PATCH_NEXT: browse = clampi(browse + 1, 0, numPatches() - 1); bump(); break;
+      case P_PATCH_PREV: browse = clampi(browse - 1, 0, numPatches() - 1); browsed(); bump(); break;
+      case P_PATCH_NEXT: browse = clampi(browse + 1, 0, numPatches() - 1); browsed(); bump(); break;
       case P_CAT_PREV: stepCategory(-1); break;
       case P_CAT_NEXT: stepCategory(1); break;
       case P_PATCH_LOAD: loadBrowsed(); break;
@@ -705,7 +726,8 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
       case P_LFO_SEL: lfo = clampi((int)lroundf(v), 0, 5); bump(); break;
       case P_FX_SEL: fxPos = clampi((int)lroundf(v), 0, n_fx_slots - 1); bump(); break;
       case P_WT: wtSelectPos((int)lroundf(v)); break;
-      case P_PATCH: browse = clampi((int)lroundf(v), 0, std::max(0, numPatches() - 1)); bump(); break;
+      case P_PATCH: browse = clampi((int)lroundf(v), 0, std::max(0, numPatches() - 1)); browsed(); bump(); break;
+      case P_AUTOLOAD: autoload = v >= 0.5f; if (!autoload) autoloadAt = 0; bump(); break;
       case P_MPE: {
         bool on = v >= 0.5f;
         if (on != mpe) {
@@ -846,6 +868,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
       }
       case P_FX_ON: return snprintf(buf, len, "%d", (patch().fx_disable.val.i >> fxSlot() & 1) ? 0 : 1);
       case P_MPE: return snprintf(buf, len, "%d", mpe ? 1 : 0);
+      case P_AUTOLOAD: return snprintf(buf, len, "%d", autoload ? 1 : 0);
       case P_MPE_BEND: return snprintf(buf, len, "%d", mpeRange());
       case P_MPE_STATUS: {
         std::string t = port.isOpen() ? std::string(port.clientName()) + " MIDI In: ch " + channels(portMask)
@@ -949,6 +972,8 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
       }
     snprintf(t, sizeof t, " PRG %d", prog);     // the PRESET menu's entry: MPC re-selects it when the project loads
     steps += t;
+    snprintf(t, sizeof t, " AL %d", autoload ? 1 : 0);
+    steps += t;
     snprintf(t, sizeof t, " MPE %d %d", mpe ? 1 : 0, mpeRange());   // after the steps: older versions stop reading there
     steps += t;
     std::string s = std::string(head) + b64enc((const unsigned char *)data, n) + " " + steps;
@@ -974,6 +999,11 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
       size_t pp = steps.rfind(" PRG ");
       if (pp != std::string::npos) sscanf(steps.c_str() + pp, " PRG %d", &pr);
       prog = pr >= 0 && pr < (int)presets.size() ? pr : 0;
+      int al = autoload ? 1 : 0;                // a state from before 0.3.2 has none: the instance keeps its setting
+      size_t ap = steps.rfind(" AL ");
+      if (ap != std::string::npos) sscanf(steps.c_str() + ap, " AL %d", &al);
+      autoload = al != 0;
+      autoloadAt = 0;
     }
     synth->loadRaw(raw.data(), (int)raw.size(), false);
     osc = clampi(o, 0, n_oscs - 1);
@@ -1064,6 +1094,10 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     if ((int)bufL.size() < n) bufL.resize(n), bufR.resize(n);
     finishLoad(false);
     readPort();                                // block resolution: about 3 ms at 128 frames
+    if (autoloadAt && frames >= autoloadAt && !loading) {    // the browsed patch, once the choice has settled
+      autoloadAt = 0;
+      loadBrowsed();
+    }
     if (loading) {                             // silence while the patch loads
       memset(out, 0, sizeof(int16_t) * 2 * n);
       frames += n;

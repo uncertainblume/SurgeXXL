@@ -1265,6 +1265,13 @@
      "knob": 3,
      "key": "mpe_bend",
      "name": "MPE BEND RANGE"
+    },
+    {
+     "n": 20,
+     "qlinkPage": 3,
+     "knob": 4,
+     "key": "autoload",
+     "name": "AUTO LOAD"
     }
    ]
   }

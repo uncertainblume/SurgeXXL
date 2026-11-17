@@ -1882,11 +1882,20 @@
    "key": "preset",
    "name": "Preset",
    "min": 0,
-   "max": 75,
+   "max": 699,
    "default": 0,
    "dynamic_display": true,
    "display": "int",
    "poll": false
+  },
+  {
+   "key": "autoload",
+   "name": "Auto Load",
+   "options": [
+    "Off",
+    "On"
+   ],
+   "default": 1
   }
  ]
 }

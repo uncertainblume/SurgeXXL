@@ -192,4 +192,5 @@
 {"mpe", B_ENGINE, "", 0, {}, 0.0f, 1.0f},
 {"mpe_bend", B_ENGINE, "", 0, {}, 1.0f, 96.0f},
 {"mpe_status", B_ENGINE, "", 0, {}, 0.0f, 1.0f},
-{"preset", B_ENGINE, "", 0, {}, 0.0f, 75.0f},
+{"preset", B_ENGINE, "", 0, {}, 0.0f, 699.0f},
+{"autoload", B_ENGINE, "", 0, {}, 0.0f, 1.0f},

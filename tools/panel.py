@@ -299,8 +299,11 @@ button(T, "patch_prev", 30, 166, 64, 46, "<", fs=20)
 button(T, "patch_next", 100, 166, 64, 46, ">", fs=20)
 button(T, "cat_prev", 176, 166, 110, 46, "< CAT", fs=15)
 button(T, "cat_next", 292, 166, 110, 46, "CAT >", fs=15)
-button(T, "patch_load", 470, 166, 130, 46, "LOAD", style="orange", fs=20)
-button(T, "patch_save", 610, 166, 130, 46, "SAVE", fs=20)
+button(T, "patch_load", 462, 166, 100, 46, "LOAD", style="orange", fs=20)
+button(T, "patch_save", 568, 166, 90, 46, "SAVE", fs=20)
+add(T, "lit", "autoload", x=668, y=170, size=38)
+text(T, 710, 172, 46, "AUTO", 13, (0xcf, 0xcf, 0xcf), align="left")
+text(T, 710, 188, 46, "LOAD", 13, (0xcf, 0xcf, 0xcf), align="left")
 knob(T, "patch", 434, 190, 34, "", value=False)
 text(T, 30, 226, 120, "LOADED", 13, (0xcf, 0xcf, 0xcf), align="left")
 readout(T, "patch_name", 100, 220, 650, 30, size=20, colour="ffffff")
@@ -350,7 +353,7 @@ DEFAULT_QLINKS = {
            "send_1", "send_2", "send_3", "send_4", "ret_1", "ret_2", "ret_3", "ret_4"],
     "patch": ["macro_%d" % (i + 1) for i in range(8)] + ["patch", "volume", "poly_limit", "portamento", "bend_up",
                                                          "bend_dn", "play_mode", "scene", "scene_mode", "split_key", "mpe",
-                                                         "mpe_bend"],
+                                                         "mpe_bend", "autoload"],
 }
 
 

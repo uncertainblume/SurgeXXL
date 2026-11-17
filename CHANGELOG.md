@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.2
+More presets, and no LOAD press. Built and tested offline.
+- **700 VST programs** (was 76): the 76 of 0.3.1 keep their positions (projects saved with it keep their entry),
+  then Surge's factory folders but Templates and Tutorials, each a heading and its patches (609 patches). The
+  LinnStrument MPE headings read `== MPE: <folder> ==`.
+- **Auto Load** (new `autoload` parameter, on by default, saved in the state, on the PATCH page beside SAVE and on
+  Q-Link page PATCH 3): a patch chosen with `<`, `>`, `CAT` or the PATCH knob loads once the choice has been
+  unchanged for 0.3 s. LOAD still works.
+- One parameter appended (`autoload`): earlier projects load unchanged.
+- `engine_test`: the list's length and its first entries, and Auto Load.
+- Not done: real MPC preset files (`.xpl`) for folders and favorites; it needs a look at how the MPC stores presets
+  on a device first.
+
 ## 0.3.1
 The LinnStrument MPE patches in MPC's PRESET menu. Built and tested offline; not yet tried on an MPC.
 - **76 VST programs** (vst.json `"programs"`, the new `preset` parameter): entry 0 is the PATCH page's own sound, then

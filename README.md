@@ -57,10 +57,11 @@ report what you find under Issues.
 
 ## Known problems
 
-- **Browsing patches is slow.** Only the 63 LinnStrument MPE patches are in the MPC's own preset list (since
-  0.3.1; see [Presets](#presets)). For the other 2945 the only way is the PATCH page (the last tab): `<` and `>`
-  step one patch at a time, `CAT` jumps to the next or previous category, and the PATCH Q-Link turns through the
-  list; then press `LOAD`. There is no list view and no search.
+- **Browsing patches is still limited.** The MPC's own preset list has 672 patches (since 0.3.2: the 63
+  LinnStrument MPE patches and Surge's 609 factory patches; see [Presets](#presets)). The other 2,336 (Surge's
+  third-party collections) are reachable only on the PATCH page (the last tab): `<` and `>` step one patch at a time,
+  `CAT` jumps to the next or previous category, and the PATCH Q-Link turns through the list. There is no list view
+  and no search. Presets in the MPC's list cannot be starred as favorites; see [Presets](#presets).
 - **MPE has had one first test on hardware**, and it worked there: per-note bends and polyphonic aftertouch came
   through on an MPC Live III with a LinnStrument. Audio glitches were heard, and nothing else about it has been
   checked on a device. See [MPE](#mpe).
@@ -90,9 +91,29 @@ Updating or removing the plugin never touches it.
 
 ## What this fork changed
 
-Three versions so far. **0.2.0** (`sdk-v0.2.0`) is the original instrument, repackaged for the SDK with a 64-bit
+Four versions so far. **0.2.0** (`sdk-v0.2.0`) is the original instrument, repackaged for the SDK with a 64-bit
 build and two crash fixes, and nothing else. **0.3.0** adds MPE. **0.3.1** puts the LinnStrument MPE patches in the
-MPC's preset list.
+MPC's preset list. **0.3.2** puts Surge's factory patches there too and adds Auto Load.
+
+### 0.3.2: more presets, and no LOAD press
+
+1. **The MPC's preset list grows from 76 to 700 entries**: the 76 of 0.3.1 stay exactly where they were (so projects
+   saved with 0.3.1 keep their entry), followed by Surge's 15 factory folders (Basses, Brass, Chords, FX, Keys,
+   Leads, MPE, Pads, Percussion, Plucks, Polysynths, Sequences, Splits, Vocoder, Winds), each a heading followed by
+   its patches: 609 more patches. Surge's Templates and Tutorials folders are left out; they are starting points
+   and lessons, not sounds. The LinnStrument MPE headings now read `== MPE: Basses ==` and so on, to tell them from
+   the factory folders.
+2. **Auto Load** on the PATCH page (a lit switch beside SAVE, and on Q-Link page PATCH 3): with it on, a patch you
+   choose with `<`, `>`, `CAT` or the PATCH knob loads by itself once you stop changing the choice for about
+   0.3 seconds, so there is no LOAD press, and stepping quickly through the list does not load every stop. It is on
+   by default. Switch it off if you would rather load by hand: an auto load replaces the sound on the track, and any
+   edits to it, exactly as LOAD does.
+3. One parameter was added at the end of the list (`autoload`); projects from earlier versions load unchanged.
+4. Tests: the list's length, its first entries, and Auto Load (not loading early, restarting its wait on a new
+   choice, loading the settled choice, doing nothing when off).
+
+**Why "popular" patches are not the criterion:** Surge keeps no record of which patches are popular, so there is
+nothing in it to rank by. Its factory set is the Surge team's own curated collection, which is why it was chosen.
 
 ### 0.3.1: the LinnStrument MPE patches as MPC presets
 
@@ -126,8 +147,8 @@ Details and set-up: [MPE](#mpe).
 ### What comes next
 
 - **More testing of MPE on real MPCs**, and tracking down the audio glitches heard in the first test.
-- **Every patch in the MPC's preset list**, if the list of 76 works well on a device. See [Presets](#presets) for
-  what stands in the way.
+- **Real preset files for the MPC's own browser** (folders, and favorites), if the MPC allows it. See
+  [Presets](#presets). This needs a look at how the MPC stores presets on a device before anything is built.
 
 ### 0.2.0: the SDK package
 
@@ -227,40 +248,48 @@ troubleshooting table.
 
 ## Presets
 
-New in 0.3.1. **Built and tested offline; not yet tried on an MPC.**
+**0.3.2: built and tested offline; the list of 76 from 0.3.1 has been used on a device, the larger list not yet.**
 
-The MPC shows a plugin's built-in programs in its own preset selector. SurgeXXL now offers 76 of them: Surge's
-LinnStrument MPE patches, grouped by folder.
+The MPC shows a plugin's built-in programs in its own preset selector. SurgeXXL offers 700 of them: Surge's
+LinnStrument MPE patches first, then Surge's factory patches, grouped by folder.
 
 ```
 - Patch page -
-== Basses ==
+== MPE: Basses ==
 Bass Guitar
-Legato Bass
-String Bass
-== Brass ==
-FM Horn
+...
+== Basses ==
+...
+== Leads ==
 ...
 ```
 
-- Pick a patch and it loads. Remember to turn **MPE** on (PATCH page) for these patches; the switch is not part of
-  a patch.
+- Pick a patch and it loads. Remember to turn **MPE** on (PATCH page) for the MPE patches; the switch is not part
+  of a patch.
 - `- Patch page -` means "whatever the PATCH page loaded". It is what the list shows after you load some other
   patch from the PATCH page, and picking it does nothing.
-- The headings are only there to group the list; picking one does nothing.
+- The headings only group the list; picking one does nothing.
 - Names are cut at 23 characters, the plugin format's limit, so "Vintage Demonic Brass Ensemble" reads
   "Vintage Demonic Brass E".
+- Surge's 2,336 third-party patches (other than the LinnStrument ones) are not in the list. They are on the PATCH
+  page, with Auto Load.
 
-### Why only these, and what about folders
+### Why there are no real folders, and no favorites
 
-- **Real folders are not available.** The MPC's own instruments group their presets in folders, but that is Akai's
-  own preset system. A third-party plugin can only hand the MPC one flat, numbered list of program names. The
-  headings are the nearest thing to folders that a flat list allows.
-- **The 1024 limit is not the MPC's.** It is a cap in the wrapper this plugin is built on, and it can be lifted.
-  What is unknown is how the MPC's preset selector copes with a list of 3000 entries, and whether it can be scrolled
-  quickly enough to be an improvement: nobody has reported trying.
-- So this version starts with the patches the fork exists for. If the list of 76 behaves well on a device, the
-  same mechanism can carry every patch (about 3400 entries with the headings), and that is the plan.
+- **A plugin can only hand the MPC one flat, numbered list of program names.** The folders you see on the MPC's own
+  instruments belong to Akai's own preset system. The headings are the nearest thing to folders that a flat list
+  allows.
+- **Favorites are for files.** The MPC's favorites work on items in its browser, which are files. A program in a
+  plugin's own list is not a file, so there is nothing to mark; to reach one you load the plugin, then choose the
+  program. This is the explanation that fits what the SDK documents and what you see on the device; it has not been
+  confirmed by testing on a device.
+- **The one route that might give real folders and favorites** is the MPC's own preset files (`.xpl`), which the
+  SDK documents as the MPC's format for presets saved from a plugin's screen. A preset file could hold a tiny
+  instruction ("load this patch"), so thousands would cost little space, be sorted into folders and, being files,
+  be favorited. Whether the MPC browses such files for a plugin installed this way, and where it expects them, is
+  not documented and has to be checked on a device first. That check is the next step.
+- **The 1024 limit is not the MPC's.** It is a cap in the wrapper this plugin is built on. The list of 700 is
+  within it. Whether the MPC's selector scrolls a list that long comfortably is something to find out on a device.
 
 ## About this fork, and how it was made
 
@@ -345,7 +374,7 @@ shows that one.
 | STEP SEQ | The selected LFO's 16 steps (bipolar), loop start and end. The LFO plays them when its shape is Step Seq |
 | MOD | The scene's modulation routings: ROUTING (turn through them; past the last one: NEW), SOURCE, TARGET (LEARN, then touch or turn any control on any page), DEPTH, CLEAR |
 | FX | The 16 slots (A and B inserts, sends, globals 1-4); the selected slot's type, its twelve parameters (named for the type), On; the scene's four send levels and the four returns; FX Chain bypass |
-| PATCH | The patch browser (`<` `>`, `CAT`, PATCH on a Q-Link), LOAD, SAVE, the loaded patch's name; the 8 macros with the patch's own names; Scene A/B, Scene Mode, Play Mode, Poly Limit, Portamento, Bend Up / Down, Split Point, Volume, PANIC; MPE (Off / On), MPE Bend Range and the MPE status line (this fork, 0.3.0). The MPC's own preset selector lists the LinnStrument MPE patches (0.3.1) |
+| PATCH | The patch browser (`<` `>`, `CAT`, PATCH on a Q-Link), LOAD, SAVE, the loaded patch's name; the 8 macros with the patch's own names; Scene A/B, Scene Mode, Play Mode, Poly Limit, Portamento, Bend Up / Down, Split Point, Volume, PANIC; Auto Load; MPE (Off / On), MPE Bend Range and the MPE status line (this fork, 0.3.0). The MPC's own preset selector lists the LinnStrument MPE and factory patches (0.3.2); Auto Load |
 
 The other six voice LFOs and scene LFOs (Surge's 4-6) still run as the patches use them; the pages show 1-3 of each
 because the Force's own automation covers the rest. MSEG and Formula LFOs play as the patch made them (they are

@@ -272,19 +272,33 @@ P += [
 # One VST program per entry (vst.json "programs"): 0 is the PATCH page's own sound, then each folder of PRESET_ROOT as a
 # heading followed by its patches, in Surge's order. src/engine.cpp builds the same list from Surge's patch list.
 PRESET_ROOT = "LinnStrument MPE"
+PRESET_FACTORY_SKIP = ("Templates", "Tutorials")     # Surge's factory folders that are not sounds (0.3.2)
 
 
 def preset_count():
-    root = os.path.join(ROOT, "third_party", "surge", "resources", "data", "patches_3rdparty", PRESET_ROOT)
+    """1 + each group's heading and patches: the LinnStrument MPE folders (the 0.3.1 list, unchanged and first), then
+    Surge's factory folders but Templates and Tutorials. src/engine.cpp makePresets() builds the same list."""
+    data = os.path.join(ROOT, "third_party", "surge", "resources", "data")
     n = 1
-    for _, _, files in os.walk(root):
-        k = sum(1 for f in files if f.lower().endswith(".fxp"))
+    mpe = os.path.join(data, "patches_3rdparty", PRESET_ROOT)
+    for d in sorted(os.listdir(mpe)):
+        p = os.path.join(mpe, d)
+        k = sum(1 for _, _, fs in os.walk(p) for f in fs if f.lower().endswith(".fxp"))
+        if k:
+            n += 1 + k
+    fac = os.path.join(data, "patches_factory")
+    for d in sorted(os.listdir(fac)):
+        if d in PRESET_FACTORY_SKIP or not os.path.isdir(os.path.join(fac, d)):
+            continue
+        k = sum(1 for _, _, fs in os.walk(os.path.join(fac, d)) for f in fs if f.lower().endswith(".fxp"))
         if k:
             n += 1 + k
     return n
 
 
 P += [eng_num("preset", "Preset", 0, preset_count() - 1, 0, display="int", poll=False)]
+# 0.3.2: choosing a patch on the PATCH page loads it once the choice has stopped changing (no LOAD press)
+P += [eng_opts("autoload", "Auto Load", ["Off", "On"], 1)]
 
 # ---- checks --------------------------------------------------------------------------------------------------------
 keys = [p["key"] for p in P]
