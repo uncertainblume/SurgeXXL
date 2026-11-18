@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.5
+The first save after a project loads, found on the first Live III run. Built and tested offline.
+- The fingerprint that tells whether the kept state text is current no longer includes the `deactivated` flag, which Surge
+  recalculates for FX parameters on the first audio block after a load. Patches that came back from a project looked
+  edited and paid a full save (9.5 ms on the device) at the first autosave.
+- `engine_test`: 46 untouched library patches save as references after a second of audio (46 of 46), and 30 edited
+  patches restored from a state and played a second save again from the kept text (30 of 30); hooks for the fingerprint's
+  parts and the parameter diff are kept for tests.
+- `mpc_bench`: `--probe-delay` (default 1 s) keeps state calls off the chord's first blocks; `--edited` makes every state
+  call a full save; default length 4 s.
+- First Live III measurements in the README: 4.7% to 35.8% of a block per instance for an 8-note chord (median 17%).
+- Not changed: a full save of an edited patch is still about 9.5 ms on the device.
+
 ## 0.3.4
 Hanging notes after the MPC's glitch: recovery, and the means to find the cause. Built and tested offline.
 - The wrapper passes `effMainsChanged`, `effStartProcess` and `effStopProcess` to the engine (`host_mains`). A resume

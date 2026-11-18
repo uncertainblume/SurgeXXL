@@ -74,7 +74,7 @@ const char *kWtPictures[] = {
 const int kNumWtPictures = sizeof(kWtPictures) / sizeof(kWtPictures[0]);
 
 const float kSampleRate = 44100.0f;
-const char *const kVersion = "0.3.4";
+const char *const kVersion = "0.3.5";
 const uint64_t kGestureFrames = 15435;   // 0.35 s: trigger sets closer than this are one Q-Link turn
 const int kRemovedFx[] = {27};           // Spring Reverb (Surge's fx type number)
 const char *kSlotNames[n_fx_slots] = {"A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4",
@@ -695,6 +695,17 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
       sxxl::Diag::get().log("state: restored (%s)", loadedName.c_str());
       return;
     }
+    if (!strcmp(key, "test_snap")) {             // the offline test only: remember every parameter value
+      dbgSnap.clear();
+      for (auto *p : patch().param_ptr) {
+        uint32_t u;
+        memcpy(&u, &p->val, sizeof u);
+        dbgSnap.push_back(u);
+        dbgSnap.push_back((uint32_t)p->temposync | (uint32_t)p->absolute << 1 | (uint32_t)p->deactivated << 2 |
+                          (uint32_t)p->extend_range << 3 | (uint32_t)p->deform_type << 8);
+      }
+      return;
+    }
     if (!strcmp(key, "host_mains")) {           // the wrapper: effMainsChanged / effStartProcess / effStopProcess
       hostMains(val);
       return;
@@ -834,6 +845,28 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     if (!strcmp(key, "state")) return getState(buf, len);
     if (!strcmp(key, "test_removed_fx")) return snprintf(buf, len, "%d", removedFx);
     if (!strcmp(key, "test_user_dir")) return put(buf, len, userDir);
+    if (!strcmp(key, "test_how")) return put(buf, len, lastHow);
+    if (!strcmp(key, "test_diff")) {            // which parameters moved since test_snap
+      std::string o;
+      auto &pp = patch().param_ptr;
+      for (size_t i = 0; i < pp.size() && 2 * i + 1 < dbgSnap.size(); ++i) {
+        uint32_t u, f = (uint32_t)pp[i]->temposync | (uint32_t)pp[i]->absolute << 1 | (uint32_t)pp[i]->deactivated << 2 |
+                        (uint32_t)pp[i]->extend_range << 3 | (uint32_t)pp[i]->deform_type << 8;
+        memcpy(&u, &pp[i]->val, sizeof u);
+        if ((u != dbgSnap[2 * i] || f != dbgSnap[2 * i + 1]) && o.size() < 300) {
+          char t[128];
+          snprintf(t, sizeof t, "%s val %08x->%08x flags %x->%x ", pp[i]->get_storage_name(), dbgSnap[2 * i], u,
+                   dbgSnap[2 * i + 1], f);
+          o += t;
+        }
+      }
+      return put(buf, len, o);
+    }
+    if (!strcmp(key, "test_hash")) {
+      uint64_t h[3];
+      hashParts(h);
+      return snprintf(buf, len, "%08x %08x %08x", (unsigned)h[0], (unsigned)h[1], (unsigned)h[2]);
+    }
     if (!strcmp(key, "test_held")) return snprintf(buf, len, "%d %d", heldCount(), synth->getNonReleasedVoices(0) + synth->getNonReleasedVoices(1));
     if (!strcmp(key, "test_num_patches")) return snprintf(buf, len, "%d", numPatches());
     if (!strcmp(key, "test_num_wt")) return snprintf(buf, len, "%d", (int)wtOrder.size());
@@ -987,6 +1020,8 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
   uint64_t bodyHash = 0;                // paramHash() when stateBody was made
   int libId = -1;                       // the library patch the sound was loaded from, while it is unchanged
   uint64_t libHash = 0;
+  std::vector<uint32_t> dbgSnap;
+  const char *lastHow = "";             // how the last getState made its patch part (the offline test reads it)
   void touched() { bodyValid = false; libId = -1; }
   std::string libRel(int id) {          // "patches_factory/Leads/X.fxp": a file of Surge's shipped library, else ""
     auto &st = synth->storage;
@@ -998,30 +1033,38 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     }
     return "";
   }
-  uint64_t paramHash() {
-    uint64_t h = 1469598103934665603ull;
-    auto mix = [&h](uint64_t v) { h = (h ^ v) * 1099511628211ull; };
+  // The fingerprint of what a patch holds that MIDI or Surge itself can change without a set(): three parts, so that the
+  // offline test can say which one moved.
+  void hashParts(uint64_t h[3]) {
+    for (int k = 0; k < 3; ++k) h[k] = 1469598103934665603ull;
+    auto mix = [&h](int k, uint64_t v) { h[k] = (h[k] ^ v) * 1099511628211ull; };
     auto &P = patch();
     for (auto *p : P.param_ptr) {
       uint32_t u;
       memcpy(&u, &p->val, sizeof u);
-      mix(u);
-      mix((uint64_t)p->temposync | (uint64_t)p->absolute << 1 | (uint64_t)p->deactivated << 2 |
-          (uint64_t)p->extend_range << 3 | (uint64_t)(uint32_t)p->deform_type << 8);
+      mix(0, u);
+      // not "deactivated": Surge works that out again for the FX parameters on the first audio block after a load, with
+      // nobody touching anything (found on the offline reload test), and nothing here can change it
+      mix(0, (uint64_t)p->temposync | (uint64_t)p->absolute << 1 | (uint64_t)p->extend_range << 3 |
+                 (uint64_t)(uint32_t)p->deform_type << 8);
     }
     for (int sc = 0; sc < n_scenes; ++sc)
       for (int o = 0; o < n_oscs; ++o) {   // a wavetable Surge has queued but not loaded yet
-        mix((uint32_t)P.scene[sc].osc[o].wt.queue_id);
-        mix((uint32_t)P.scene[sc].osc[o].wt.current_id);
+        mix(1, (uint32_t)P.scene[sc].osc[o].wt.queue_id);
+        mix(1, (uint32_t)P.scene[sc].osc[o].wt.current_id);
       }
     for (int m = 0; m < 8; ++m) {
       float f = synth->getMacroParameterTarget01(m);
       uint32_t u;
       memcpy(&u, &f, sizeof u);
-      mix(u);
+      mix(2, u);
     }
-    mix((uint32_t)P.fx_disable.val.i);
-    return h;
+    mix(2, (uint32_t)P.fx_disable.val.i);
+  }
+  uint64_t paramHash() {
+    uint64_t h[3];
+    hashParts(h);
+    return (h[0] * 31 + h[1]) * 31 + h[2];
   }
   std::string fullBody() {              // saveRaw as base64, then the step sequences (see below), all of it
     void *data = nullptr;
@@ -1046,6 +1089,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     double tA = nowSec();
     uint64_t h = paramHash();
     const char *how = "kept";
+    lastHow = how;
     if (!(bodyValid && h == bodyHash)) {
       auto &stg = synth->storage;       // a tuning kept from an earlier patch is not in the file
       bool tuningOk = stg.isStandardTuning || patch().patchTuning.tuningStoredInPatch;
@@ -1057,6 +1101,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     }
     char head[96], tail[160];
     snprintf(head, sizeof head, "SXXL1 %d %d %d %d %d %d ", osc, lfo, fxPos, browse, modSlot, modNewSrc);
+    lastHow = how;
     // after the patch part, so that older versions stop reading before it: the PRESET menu's entry (MPC re-selects it
     // when the project loads), Auto Load, MPE
     // GL: the three settings Surge keeps across patch loads (volume, FX bypass; the poly limit comes with the patch), which

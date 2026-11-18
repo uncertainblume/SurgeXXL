@@ -735,6 +735,70 @@ void testHostEvents(void *s) {
          "key is logged\n");
 }
 
+// How often an untouched library patch really saves as a file reference (not a full save): a patch that looks changed
+// right after it loads (Surge fills in a wavetable's ids on the first audio block, say) would pay the full save.
+void testReferenceRate(void *s) {
+  seti(s, "autoload", 0);
+  int n = atoi(get(s, "test_num_patches").c_str());
+  int tried = 0, refs = 0;
+  std::string missed;
+  for (int i = 7; i < n; i += std::max(1, n / 45)) {
+    seti(s, "patch", i);
+    std::string name = get(s, "patch_browse");
+    tap(s, "patch_load");
+    if (!waitLoaded(s)) continue;
+    render(s, 22050);
+    std::string a = get(s, "state"), b;
+    render(s, 22050);
+    b = get(s, "state");
+    ++tried;
+    bool ref = a.find(" @patches_") != std::string::npos && b.find(" @patches_") != std::string::npos;
+    refs += ref;
+    if (!ref && missed.size() < 600) missed += (missed.empty() ? "" : "; ") + name;
+  }
+  CHECK(refs >= tried - tried / 10, "untouched library patches save as references: %d of %d (not: %s)", refs, tried,
+        missed.c_str());
+  printf("ok   references: %d of %d untouched library patches save as a file reference after one second of audio%s%s\n",
+         refs, tried, missed.empty() ? "" : "; not: ", missed.c_str());
+}
+
+// A project reload: the state is restored, the audio runs, and the next save should hand the same text back, not pay for
+// a full save again (it did on a Live III: 9.5 ms at the first autosave after a reload).
+void testReloadSave(void *s, const char *dataDir) {
+  seti(s, "autoload", 0);
+  int n = atoi(get(s, "test_num_patches").c_str());
+  int checked = 0, paid = 0;
+  std::string missed;
+  for (int i = 11; i < n; i += std::max(1, n / 30)) {
+    seti(s, "patch", i);
+    std::string name = get(s, "patch_browse");
+    tap(s, "patch_load");
+    if (!waitLoaded(s)) continue;
+    render(s, 4410);
+    setf(s, "f1_cutoff", 0.37);                 // an edited patch: its save is a full one
+    render(s, 4410);
+    std::string st = get(s, "state");
+    void *t = E->create(dataDir);
+    set(t, "state", st.c_str());
+    std::string hashBefore = get(t, "test_hash");
+    set(t, "test_snap", "1");
+    render(t, 22050);                           // the audio runs: Surge fills in what it loads lazily
+    std::string again = get(t, "state");
+    ++checked;
+    if (get(t, "test_how") != "kept" || again != st) {
+      ++paid;
+      if (missed.size() < 700)
+        missed += (missed.empty() ? "" : "; ") + name + " (" + get(t, "test_how") + ", fingerprint parts " + hashBefore +
+                  " -> " + get(t, "test_hash") + ": " + get(t, "test_diff") + ")";
+    }
+    E->destroy(t);
+  }
+  CHECK(paid == 0, "after a reload the first save hands the text back: %d of %d paid again: %s", paid, checked,
+        missed.c_str());
+  printf("ok   reload: %d edited patches restored, played a second, and saved again from the kept text%s%s\n", checked,
+         paid ? "; paid again: " : "", missed.c_str());
+}
+
 void testState(void *s, const char *dataDir) {
   timeHousekeeping(s);
   {   // how long the host's "give me your state" call takes: autosave makes it while the audio keeps running
@@ -750,7 +814,7 @@ void testState(void *s, const char *dataDir) {
            sum / 5, worst);
   }
   std::string st = get(s, "state");
-  CHECK(st.size() > 1000, "state is %zu bytes", st.size());
+  CHECK(st.size() > 1000 || st.find(" @patches_") != std::string::npos, "state is %zu bytes", st.size());
   void *t = E->create(dataDir);
   set(t, "state", st.c_str());
   render(t, 1024);
@@ -821,6 +885,8 @@ int main(int argc, char **argv) {
   testPresets(s, data.c_str());
   testAutoload(s);
   testStateKept(s, data.c_str());
+  testReferenceRate(s);
+  testReloadSave(s, data.c_str());
   testHostEvents(s);
   testState(s, data.c_str());
   E->destroy(s);

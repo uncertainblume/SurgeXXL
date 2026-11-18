@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // mpc_bench: loads a VST2 plugin the way the MPC does and measures what it costs the audio thread, on the device.
 //
-//   mpc_bench <plugin.so> [--seconds 3] [--every 25 | --programs 2,50,300] [--notes 8] [--state-hz 4] [--fast]
+//   mpc_bench <plugin.so> [--seconds 4] [--every 25 | --programs 2,50,300] [--notes 8] [--state-hz 4] [--fast]
+//             [--edited] [--probe-delay 1]
+//
+// --edited changes a parameter before every state call, so each call is the full save of an edited patch (the slow
+// one) instead of a reference or the kept text. --probe-delay keeps the state calls off the chord's first blocks,
+// which are the heaviest anyway, so that a state call is not blamed for them (default 1 second).
 //
 // For each chosen program (patch) it selects the program, plays a chord, and times every processReplacing call
 // against the block's real-time budget (128 frames at 44.1 kHz = 2.9 ms). A second thread asks for the plugin's
@@ -76,11 +81,19 @@ static intptr_t host(AEffect *, int32_t op, int32_t, intptr_t, void *, float) {
 struct StateProbe {                    // the second thread: what autosave does
   AEffect *e;
   double hz;
+  double delay = 1.0;                  // seconds before the first call
+  int editParam = -1;                  // >= 0: change this parameter before every call (a full save each time)
   std::atomic<bool> stop{false};
   std::vector<std::pair<double, double>> calls;   // start, end (us)
   static void *run(void *p) {
     StateProbe *s = (StateProbe *)p;
+    for (double waited = 0; waited < s->delay && !s->stop; waited += 0.01) {
+      timespec ts = {0, 10 * 1000 * 1000};
+      nanosleep(&ts, nullptr);
+    }
+    bool flip = false;
     while (!s->stop) {
+      if (s->editParam >= 0) s->e->setParameter(s->e, s->editParam, (flip = !flip) ? 0.31f : 0.30f);
       double t0 = nowUs();
       void *chunk = nullptr;
       s->e->dispatcher(s->e, effGetChunk, 0, 0, &chunk, 0);
@@ -117,9 +130,9 @@ int main(int argc, char **argv) {
                     "[--state-hz 4] [--fast]\n");
     return 2;
   }
-  double seconds = 3, stateHz = 4;
+  double seconds = 4, stateHz = 4, probeDelay = 1.0;
   int every = 25, nnotes = 8;
-  bool fast = false;
+  bool fast = false, edited = false;
   std::vector<int> programs;
   for (int i = 2; i < argc; ++i) {
     std::string a = argv[i];
@@ -128,6 +141,8 @@ int main(int argc, char **argv) {
     else if (a == "--notes" && i + 1 < argc) nnotes = std::max(1, std::min(16, atoi(argv[++i])));
     else if (a == "--state-hz" && i + 1 < argc) stateHz = atof(argv[++i]);
     else if (a == "--fast") fast = true;
+    else if (a == "--edited") edited = true;
+    else if (a == "--probe-delay" && i + 1 < argc) probeDelay = atof(argv[++i]);
     else if (a == "--programs" && i + 1 < argc) {
       char *s = strdup(argv[++i]);
       for (char *t = strtok(s, ","); t; t = strtok(nullptr, ",")) programs.push_back(atoi(t));
@@ -152,14 +167,24 @@ int main(int argc, char **argv) {
     e->dispatcher(e, effGetProgramNameIndexed, i, 0, n, 0);
     names.push_back(n);
   }
+  int editParam = -1;
+  if (edited) {                                    // a continuous parameter to change before each state call
+    for (int i = 0; i < e->numParams && editParam < 0; ++i) {
+      char n[64] = {0};
+      e->dispatcher(e, 8, i, 0, n, 0);             // effGetParamName
+      if (!strcmp(n, "Filter 1 Cutoff")) editParam = i;
+    }
+    if (editParam < 0) fprintf(stderr, "no 'Filter 1 Cutoff' parameter: --edited ignored\n");
+  }
   if (programs.empty()) {
     for (int i = 1; i < e->numPrograms; i += every)
       if (names[i].compare(0, 3, "== ") != 0) programs.push_back(i);
     if (programs.empty()) programs.push_back(0);
   }
   printf("%s: %d programs, %d outputs; block %d frames = %.0f us; %zu patch(es), %d-note chord, %.1f s each, "
-         "state call %.1f/s%s\n", argv[1], e->numPrograms, e->numOutputs, kBlock, kBudgetUs, programs.size(), nnotes,
-         seconds, stateHz, fast ? ", unpaced" : ", paced in real time");
+         "state call %.1f/s from %.1f s%s%s\n", argv[1], e->numPrograms, e->numOutputs, kBlock, kBudgetUs,
+         programs.size(), nnotes, seconds, stateHz, probeDelay, editParam >= 0 ? ", each after an edit (full saves)" : "",
+         fast ? ", unpaced" : ", paced in real time");
   printf("%-4s %-24s %7s %7s %7s %7s  %9s %9s %8s\n", "no.", "patch", "avg %", "p99 %", "max %", "overrun",
          "state ms", "blk@state", "blk else");
 
@@ -182,6 +207,8 @@ int main(int argc, char **argv) {
     StateProbe probe;
     probe.e = e;
     probe.hz = stateHz;
+    probe.delay = probeDelay;
+    probe.editParam = editParam;
     pthread_t th;
     bool probing = stateHz > 0 && pthread_create(&th, nullptr, StateProbe::run, &probe) == 0;
     std::vector<Block> blocks;

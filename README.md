@@ -98,11 +98,31 @@ Updating or removing the plugin never touches it.
 
 ## What this fork changed
 
-Six versions so far. **0.2.0** (`sdk-v0.2.0`) is the original instrument, repackaged for the SDK with a 64-bit
+Seven versions so far. **0.2.0** (`sdk-v0.2.0`) is the original instrument, repackaged for the SDK with a 64-bit
 build and two crash fixes, and nothing else. **0.3.0** adds MPE. **0.3.1** puts the LinnStrument MPE patches in the
 MPC's preset list. **0.3.2** puts Surge's factory patches there too and adds Auto Load. **0.3.3** makes the project save much lighter
 (the MPC's autosave) and adds a benchmark to run on the MPC. **0.3.4** tries to recover from hanging notes and logs
-what the MPC does to the plugin, so that the cause can be found.
+what the MPC does to the plugin, so that the cause can be found. **0.3.5** fixes the first save after a project loads
+(measured on a Live III) and improves the benchmark.
+
+### 0.3.5: the first save after a project loads
+
+The first device run of 0.3.3/0.3.4 (a Live III) showed that a save of a patch restored from a project cost 9.5 ms, about
+three audio blocks, where the saves of untouched library patches cost 0.1 to 0.2 ms. The offline tests found why.
+
+1. **Surge recalculates a flag on some FX parameters (`deactivated`) on the first audio block after a load**, with
+   nobody touching anything. The fingerprint that decides whether the saved text is still current included it, so those
+   patches looked edited a moment after loading and paid a full save once. It is no longer part of the fingerprint.
+2. **Tests that would have caught it:** 46 untouched library patches spread over the whole library each load, play for
+   a second, and must save as a file reference (46 of 46; before the fix one failed). 30 edited patches each have their
+   state restored into a second instance (a project reload), play a second, and the next save must hand the same text
+   back without a full save (30 of 30; before the fix two paid again, Brass Nostalgia and Garage Depth).
+3. **A full save of an edited patch is still about 9.5 ms on the device**, once per edit and per instance (the saved text
+   is then kept). Nothing here shortens that. Doing that work without holding up the audio would mean running Surge's
+   save while the audio runs, as Surge's own plugin does; it is not done because a mistake would be a crash, not a click.
+4. **The benchmark** now keeps its state calls off the chord's first blocks (`--probe-delay`, default 1 second), so that
+   a state call is no longer blamed for the heavy note-on blocks, and has `--edited`, which changes a parameter before
+   every state call so that each one is the full save of an edited patch. Both were suggested by the first device run.
 
 ### 0.3.4: hanging notes
 
@@ -370,9 +390,24 @@ ssh root@<mpc ip> "/tmp/mpc_bench '/nvme/VST2 Plugins/L'\''Cronx - VST - SurgeXX
 The "state ms" figure is the whole call as the host sees it, so it includes any wait for the audio block that is
 running at the time to finish; the plugin's own log (`surgexxl.log`) gives the time of the work itself.
 
+`--edited` changes a parameter before every state call so that each call is a full save of an edited patch; `--probe-delay S`
+(default 1) keeps the state calls away from the chord's first blocks.
+
 `--every N` tries every Nth program, `--programs 2,50,300` picks them, `--notes` changes the chord size, `--seconds`
 the length. It writes nothing but its report and opens no audio device. Run on the MPC, the figures say what one
 instance costs; two instances cost about twice as much, and so on.
+
+### First measurements on a Live III (0.3.4, MPC app running a project)
+
+25 patches (every 25th program), an 8-note chord for 3 seconds each:
+
+- Average cost: **4.7% to 35.8% of a block per instance, median 17%**. The heaviest were DX Electric Piano (36%), Choir
+  Pad Thing (34%), Pad 1 (28%) and Synth Choir MW O-Ah (27%); the lightest FM Bass 5, Koala 2 and Probability (about 5%).
+- 99th-percentile block: at most 57% (Pluck And Sing). **One block in the whole run took longer than its budget** (110%,
+  Pluck And Sing), at the start of the chord. Blocks that start a chord are the worst: eight notes starting at once cost
+  70 to 90% of a block in several patches, where played notes one or two at a time cost much less.
+- So one instance is comfortable on this unit, and two or three should be, if the other tracks leave room; chords that
+  start a lot of voices at once are what can run over. These figures include the MPC application's own load.
 
 ## About this fork, and how it was made
 
