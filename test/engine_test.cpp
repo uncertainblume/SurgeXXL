@@ -703,6 +703,38 @@ void testStateKept(void *s, const char *dataDir) {
          "restores exactly; %d random edits matched\n", ops);
 }
 
+// What the plugin does when the MPC stops and restarts it, and what it remembers about held keys
+void testHostEvents(void *s) {
+  seti(s, "autoload", 0);
+  tap(s, "panic");
+  render(s, 22050);
+  CHECK(get(s, "test_held").substr(0, 2) == "0 ", "no keys held after a panic: %s", get(s, "test_held").c_str());
+  note(s, 60, 100);
+  note(s, 64, 100);
+  render(s, 4410);
+  std::string h = get(s, "test_held");
+  CHECK(h.substr(0, 2) == "2 " && h.substr(2) != "0", "two keys held and sounding: %s", h.c_str());
+  set(s, "host_mains", "1");                    // a resume with no suspend before it: nothing happens
+  render(s, 512);
+  CHECK(get(s, "test_held").substr(0, 2) == "2 ", "a resume without a suspend keeps the notes: %s", get(s, "test_held").c_str());
+  set(s, "host_mains", "start");
+  set(s, "host_mains", "0");                    // suspended, and a note-off sent meanwhile never arrives
+  set(s, "host_mains", "1");
+  render(s, 512);
+  h = get(s, "test_held");
+  CHECK(h == "0 0", "a resume after a suspend lets go of the held notes: %s", h.c_str());
+  // a note-on for a key whose note-off never came is logged, and the key still plays
+  note(s, 67, 100);
+  note(s, 67, 100);
+  render(s, 4410);
+  note(s, 67, 0);
+  render(s, 22050);
+  CHECK(get(s, "test_held").substr(0, 2) == "0 ", "the retriggered key is released by one note-off: %s", get(s, "test_held").c_str());
+  tap(s, "panic");
+  printf("ok   host events: a resume after a suspend lets go of held notes, a resume without one does not; a retriggered "
+         "key is logged\n");
+}
+
 void testState(void *s, const char *dataDir) {
   timeHousekeeping(s);
   {   // how long the host's "give me your state" call takes: autosave makes it while the audio keeps running
@@ -789,6 +821,7 @@ int main(int argc, char **argv) {
   testPresets(s, data.c_str());
   testAutoload(s);
   testStateKept(s, data.c_str());
+  testHostEvents(s);
   testState(s, data.c_str());
   E->destroy(s);
   printf(fails ? "FAILED: %d\n" : "PASSED\n", fails);

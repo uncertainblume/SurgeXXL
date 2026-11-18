@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.4
+Hanging notes after the MPC's glitch: recovery, and the means to find the cause. Built and tested offline.
+- The wrapper passes `effMainsChanged`, `effStartProcess` and `effStopProcess` to the engine (`host_mains`). A resume
+  that follows a suspend lets go of every held note; a resume with no suspend before it does nothing.
+- The engine keeps which keys it believes are held, and `surgexxl.log` records: the host's suspend / resume / start /
+  stop (`host:`); gaps of more than 50 ms between audio blocks (`audio:`), at most 60 lines; keys held at every save;
+  and a note-on for a key still held, with how long it has been held (`midi:`), at most 40 lines.
+- PANIC and a patch load forget the held keys.
+- `engine_test`: held keys counted, a resume after a suspend releasing them, a resume without a suspend not, a
+  retriggered key released by one note-off.
+- Not claimed: that this is the cause. An overflow of the MPC's own MIDI input queue would not be repaired by it.
+
+
 ## 0.3.3
 A lighter project save (the MPC's autosave), and a benchmark. Built and tested offline.
 - **The state is a file reference for an untouched library patch**: `SXXL1 ... @patches_factory/Leads/X.fxp ...`, about

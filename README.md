@@ -93,10 +93,35 @@ Updating or removing the plugin never touches it.
 
 ## What this fork changed
 
-Five versions so far. **0.2.0** (`sdk-v0.2.0`) is the original instrument, repackaged for the SDK with a 64-bit
+Six versions so far. **0.2.0** (`sdk-v0.2.0`) is the original instrument, repackaged for the SDK with a 64-bit
 build and two crash fixes, and nothing else. **0.3.0** adds MPE. **0.3.1** puts the LinnStrument MPE patches in the
 MPC's preset list. **0.3.2** puts Surge's factory patches there too and adds Auto Load. **0.3.3** makes the project save much lighter
-(the MPC's autosave) and adds a benchmark to run on the MPC.
+(the MPC's autosave) and adds a benchmark to run on the MPC. **0.3.4** tries to recover from hanging notes and logs
+what the MPC does to the plugin, so that the cause can be found.
+
+### 0.3.4: hanging notes
+
+A note that keeps sounding after a glitch, until you hit the same key again, has lost its note-off somewhere between
+the controller and Surge. This version does not claim to know where.
+
+1. **A resume after a suspend lets go of every held note.** If the MPC stops the plugin around a project save and
+   starts it again, a note-off sent in between cannot arrive, so the plugin releases what is held, as plugin
+   frameworks do on a resume. A first start with no suspend before it does nothing, so held notes are not cut when
+   a project loads or a transport starts (if the MPC does either through the same call, `surgexxl.log` will say so).
+2. **`surgexxl.log` now says what happened.** It records the MPC suspending, resuming, starting and stopping the
+   plugin; every gap of more than 50 ms between audio blocks, with the number of keys held; the number of keys held
+   at every save; and any note-on for a key that is still held, which proves that its note-off never arrived.
+3. **The PANIC button** on the PATCH page releases everything now, as before; it is the quickest way out of a hung
+   note until the cause is known.
+
+What is not known, and what the log will show after the next glitch and hang:
+- whether the MPC stops and restarts the plugin around an autosave (the `host:` lines);
+- whether the audio really stops for a time (the `audio:` lines give the length);
+- whether the note-off was lost on the way in (a `midi:` line when the key is played again).
+
+One possibility the plugin cannot repair: if the MPC's own MIDI input queue overflows while the audio is stopped, which a
+dense MPE stream could do, notes-off are dropped before the plugin sees them. The `midi:` line would then appear with
+no `host:` line before it.
 
 ### 0.3.3: a lighter save, and a way to measure
 

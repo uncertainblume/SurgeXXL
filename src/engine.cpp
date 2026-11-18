@@ -74,7 +74,7 @@ const char *kWtPictures[] = {
 const int kNumWtPictures = sizeof(kWtPictures) / sizeof(kWtPictures[0]);
 
 const float kSampleRate = 44100.0f;
-const char *const kVersion = "0.3.3";
+const char *const kVersion = "0.3.4";
 const uint64_t kGestureFrames = 15435;   // 0.35 s: trigger sets closer than this are one Q-Link turn
 const int kRemovedFx[] = {27};           // Spring Reverb (Surge's fx type number)
 const char *kSlotNames[n_fx_slots] = {"A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4",
@@ -421,6 +421,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     if (id < 0 || loading) return;
     prog = presetOf(id);
     touched();
+    clearHeld();                                // the load stops every voice
     loadedPath = synth->storage.patch_list[id].path.generic_string();
     loadedName = synth->storage.patch_list[id].name;
     joinLoader();
@@ -673,7 +674,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
       case P_CAT_NEXT: stepCategory(1); break;
       case P_PATCH_LOAD: loadBrowsed(); break;
       case P_PATCH_SAVE: savePatch(); break;
-      case P_PANIC: synth->allNotesOff(); break;
+      case P_PANIC: synth->allNotesOff(); clearHeld(); break;
       case P_MOD_LEARN: learn = !learn; modMsg = learn ? "Touch a control to modulate" : ""; bump(); break;
       case P_MOD_CLEAR: {
         ModSlot m;
@@ -692,6 +693,10 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
       sxxl::Diag::get().log("state: restoring %d bytes", (int)strlen(val));
       setState(val);
       sxxl::Diag::get().log("state: restored (%s)", loadedName.c_str());
+      return;
+    }
+    if (!strcmp(key, "host_mains")) {           // the wrapper: effMainsChanged / effStartProcess / effStopProcess
+      hostMains(val);
       return;
     }
     if (!strcmp(key, "test_crash") && getenv("SXXL_TEST_CRASH")) {   // the offline test of the crash log only
@@ -829,6 +834,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     if (!strcmp(key, "state")) return getState(buf, len);
     if (!strcmp(key, "test_removed_fx")) return snprintf(buf, len, "%d", removedFx);
     if (!strcmp(key, "test_user_dir")) return put(buf, len, userDir);
+    if (!strcmp(key, "test_held")) return snprintf(buf, len, "%d %d", heldCount(), synth->getNonReleasedVoices(0) + synth->getNonReleasedVoices(1));
     if (!strcmp(key, "test_num_patches")) return snprintf(buf, len, "%d", numPatches());
     if (!strcmp(key, "test_num_wt")) return snprintf(buf, len, "%d", (int)wtOrder.size());
     std::string k(key);
@@ -1059,7 +1065,8 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
              patch().volume.val.f, patch().fx_bypass.val.i);
     std::string s = std::string(head) + stateBody + tail;
     // the device's own numbers, in surgexxl.log, for what a save costs the audio
-    sxxl::Diag::get().log("state: %d bytes of text (%s) in %.2f ms", (int)s.size(), how, (nowSec() - tA) * 1000);
+    sxxl::Diag::get().log("state: %d bytes of text (%s) in %.2f ms (%d keys held)", (int)s.size(), how,
+                          (nowSec() - tA) * 1000, heldCount());
     if ((int)s.size() + 1 > len) return 0;     // never a cut state: the host keeps the last good one
     memcpy(buf, s.c_str(), s.size() + 1);
     return (int)s.size();
@@ -1163,6 +1170,51 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
   }
 
   // ---- MIDI ----
+  // Which keys the plugin believes are held, so that what a stuck note leaves behind can be seen in surgexxl.log: a
+  // note-on for a key that is still held means its note-off never came. Also the gaps between audio blocks.
+  bool held[16][128] = {};
+  uint64_t heldAt[16][128] = {};
+  int anomalies = 0, gapLogs = 0;
+  double lastRenderAt = 0;
+  bool suspended = false;
+  int heldCount() {
+    int c = 0;
+    for (auto &r : held) for (bool b : r) c += b;
+    return c;
+  }
+  void clearHeld() { memset(held, 0, sizeof held); }
+  void track(int st, int ch, int d1, int d2) {
+    if (st == 0x90 && d2) {
+      if (held[ch][d1] && anomalies < 40) {
+        ++anomalies;
+        sxxl::Diag::get().log("midi: note-on for key %d on channel %d, still held since %.1f s: its note-off never "
+                              "came (%d keys held)", d1, ch + 1, (frames - heldAt[ch][d1]) / (double)kSampleRate,
+                              heldCount());
+      }
+      held[ch][d1] = true;
+      heldAt[ch][d1] = frames;
+    } else if (st == 0x80 || st == 0x90) {
+      held[ch][d1] = false;
+    } else if (st == 0xb0 && (d1 == 120 || d1 == 123)) {
+      clearHeld();
+    }
+  }
+  // What the host did to the plugin (the wrapper passes effMainsChanged, effStartProcess and effStopProcess here). A
+  // resume that follows a suspend lets go of every held note, as a plugin framework does on resume: a note-off sent
+  // while the plugin was stopped is not coming. A resume with no suspend before it (the first at load) does nothing.
+  void hostMains(const char *v) {
+    bool resume = !strcmp(v, "1"), suspend = !strcmp(v, "0");
+    sxxl::Diag::get().log("host: %s (%d keys held%s)", suspend ? "suspend" : resume ? "resume" : v, heldCount(),
+                          resume && suspended ? ", letting them go" : "");
+    if (suspend) suspended = true;
+    if (resume) {
+      if (suspended && !loading) {
+        synth->allNotesOff();
+        clearHeld();
+      }
+      suspended = false;
+    }
+  }
   void midi(const uint8_t *m, int n) {         // from the track (the plugin interface)
     if (n < 1) return;
     noteSeen(trackMask, m, n);
@@ -1173,6 +1225,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     if (n < 1 || loading) return;              // the load stops every voice anyway
     int st = m[0] & 0xf0, ch = m[0] & 0x0f;
     int d1 = n > 1 ? m[1] & 0x7f : 0, d2 = n > 2 ? m[2] & 0x7f : 0;
+    track(st, ch, d1, d2);
     switch (st) {
       case 0x90:
         if (d2) synth->playNote(ch, d1, d2, 0);
@@ -1215,6 +1268,15 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     ScopedDenormalDisable ftz;
     if ((int)bufL.size() < n) bufL.resize(n), bufR.resize(n);
     finishLoad(false);
+    {   // the audio thread was not called for a while: the MPC stopped the audio (a project save does)
+      double t = nowSec();
+      if (lastRenderAt > 0 && t - lastRenderAt > 0.05 && gapLogs < 60) {
+        ++gapLogs;
+        sxxl::Diag::get().log("audio: %.0f ms since the last block (%d keys held)", (t - lastRenderAt) * 1000,
+                              heldCount());
+      }
+      lastRenderAt = t;
+    }
     readPort();                                // block resolution: about 3 ms at 128 frames
     if (autoloadAt && frames >= autoloadAt && !loading) {    // the browsed patch, once the choice has settled
       autoloadAt = 0;

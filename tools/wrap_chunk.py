@@ -30,17 +30,35 @@ def mpe_cando(text):
     return text.replace(CANDO_OLD, CANDO_NEW)
 
 
+HOST_OLD = "    case effSetSampleRate: case effSetBlockSize: case effMainsChanged: return 1;"
+HOST_NEW = """    case effSetSampleRate: case effSetBlockSize: return 1;
+    case effMainsChanged: {   /* SurgeXXL: the engine logs it, and lets go of held notes on a resume (src/engine.cpp) */
+        char hv[16];
+        snprintf(hv, sizeof hv, "%d", (int)v);
+        eng_set(w, "host_mains", hv);
+        return 1;
+    }
+    case 71: eng_set(w, "host_mains", "start"); return 0;   /* effStartProcess */
+    case 72: eng_set(w, "host_mains", "stop"); return 0;    /* effStopProcess */"""
+
+
+def host_events(text):
+    if text.count(HOST_OLD) != 1:
+        sys.exit("wrap_chunk: the wrapper's effMainsChanged line changed; update tools/wrap_chunk.py")
+    return text.replace(HOST_OLD, HOST_NEW)
+
+
 def main():
     src = os.path.join(sys.argv[1], "wrapper", "vst2_wrap.c")
     out = sys.argv[2]
     text = open(src).read()
     if "CHUNK_MAX" in text:          # upstream has it already: only the MPE answer is added
-        open(out, "w").write(mpe_cando(text))
+        open(out, "w").write(host_events(mpe_cando(text)))
         return
     if text.count(OLD) != 1 or text.count('#include "params.h"\n') != 1:
         sys.exit("wrap_chunk: mpc-vst-plugins' vst2_wrap.c changed; update tools/wrap_chunk.py")
     text = text.replace(OLD, NEW).replace('#include "params.h"\n', '#include "params.h"\n' + GUARD)
-    text = mpe_cando(text)
+    text = host_events(mpe_cando(text))
     open(out, "w").write(text)
 
 
