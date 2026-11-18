@@ -569,7 +569,142 @@ void testAutoload(void *s) {
          pick2.c_str());
 }
 
+// What the wrapper does on the audio thread, under the engine lock (measured here, relative to a 2.9 ms block)
+void timeHousekeeping(void *s) {
+  int nb = 0;
+  double t0 = now();
+  for (int rep = 0; rep < 20; ++rep)
+    for (const KeyDef &k : kKeys)
+      if (k.bind != B_ENGINE) { get(s, k.key); ++nb; }
+  double all = (now() - t0) * 1000 / 20;                     // the sweep after a display_rev change: every value
+  static const char *readouts[] = {"wt_name", "wt_folder", "mod_target", "mod_info", "patch_name", "patch_browse",
+                                   "patch_cat", "mpe_status", "macro_1_name", "macro_2_name", "macro_3_name",
+                                   "macro_4_name", "macro_5_name", "macro_6_name", "macro_7_name", "macro_8_name"};
+  t0 = now();
+  for (int rep = 0; rep < 200; ++rep)
+    for (const char *k : readouts) get(s, k);
+  double poll = (now() - t0) * 1000 / 200;                   // the 100 ms poll of the text readouts
+  printf("     audio-thread work under the engine lock: the readout poll (every 100 ms) %.2f ms; the sweep of all %d "
+         "values after a display change %.1f ms\n", poll, nb / 20, all);
+}
+
+// Every value of `s` against a second instance that restored `s`'s state (what a project reload gives): the count that differ
+int stateDiff(void *s, void *t, bool quiet = false, bool skipMod = false) {
+  int diff = 0;
+  for (const KeyDef &k : kKeys) {
+    // Surge numbers a patch's routings again when it loads: the selected routing's slot can point at another one
+    if (skipMod && (!strcmp(k.key, "mod_src") || !strcmp(k.key, "mod_depth") || !strcmp(k.key, "mod_target") ||
+                    !strcmp(k.key, "mod_info"))) continue;
+    if (k.bind == B_ENGINE && (strstr(k.key, "_prev") || strstr(k.key, "_next") || strstr(k.key, "learn") ||
+                               !strcmp(k.key, "mpe_status"))) continue;   // the status is what this instance has heard
+    // a patch with no wavetable has no table position: the browse position is then whatever was left from before
+    if (get(s, "wt_name").empty() && (!strcmp(k.key, "wt") || !strcmp(k.key, "wt_folder") || !strcmp(k.key, "wt_pic")))
+      continue;
+    std::string a = get(s, k.key), b = get(t, k.key);
+    if (a != b && !(k.bind == B_CONT && fabs(atof(a.c_str()) - atof(b.c_str())) < 1e-4)) {
+      ++diff;
+      if (!quiet && diff < 10) printf("     state: %s %s != %s\n", k.key, a.c_str(), b.c_str());
+    }
+  }
+  return diff;
+}
+
+// The state keeps what it can (a reference to a library patch's file; the last text while nothing changed): it must
+// never be stale. Every edit below must show in a restored instance.
+void testStateKept(void *s, const char *dataDir) {
+  seti(s, "autoload", 0);
+  int n = atoi(get(s, "test_num_patches").c_str());
+  setf(s, "volume", 0.61);                    // Surge keeps these across patch loads, so a reference must carry them
+  seti(s, "fx_bypass", 2);
+  seti(s, "patch", n / 3);
+  tap(s, "patch_load");
+  CHECK(waitLoaded(s), "a library patch loads");
+  render(s, 22050);
+  std::string st = get(s, "state");
+  bool ref = st.find(" @patches_") != std::string::npos;
+  CHECK(ref && st.size() < 400, "an unchanged library patch is saved as a reference: %zu bytes, %s", st.size(),
+        st.substr(0, 90).c_str());
+  void *t = E->create(dataDir);
+  set(t, "state", st.c_str());
+  render(t, 1024);
+  CHECK(stateDiff(s, t) == 0, "a reference state restores the same sound");
+  CHECK(get(s, "fx_bypass") == "2" && get(t, "fx_bypass") == "2",       // Surge keeps it across loads, a file cannot
+        "FX bypass kept across the load and in the reference: live %s, restored %s", get(s, "fx_bypass").c_str(),
+        get(t, "fx_bypass").c_str());
+  CHECK(get(t, "state") == st, "and saves the same text");
+  E->destroy(t);
+  // each edit: the state must change, and a restored instance must have it
+  struct Edit { const char *what; void (*fn)(void *); };
+  static const Edit edits[] = {
+      {"a parameter", [](void *s) { setf(s, "f1_cutoff", 0.123); }},
+      {"an option", [](void *s) { seti(s, "ws_type", 3); }},
+      {"a switch", [](void *s) { seti(s, "mute_o2", get(s, "mute_o2") == "1" ? 0 : 1); }},
+      {"a step", [](void *s) { setf(s, "seq_3", 0.7); }},
+      {"a macro", [](void *s) { setf(s, "macro_2", 0.66); }},
+      {"the FX type", [](void *s) { seti(s, "fx_sel", 0); seti(s, "fx_type", 5); }},
+      {"an FX parameter", [](void *s) { setf(s, "fx_p1", 0.31); }},
+      {"the wavetable", [](void *s) {
+         seti(s, "osc_sel", 0); seti(s, "osc_type", 2); render(s, 4410);      // a Wavetable oscillator loads its table
+         seti(s, "wt", 20); render(s, 8820); }},
+      {"a modulation", [](void *s) {
+         seti(s, "mod_slot", 64); seti(s, "mod_src", 16); tap(s, "mod_learn"); setf(s, "f1_cutoff", 0.4);
+         setf(s, "mod_depth", 0.35); }},
+  };
+  for (const Edit &e : edits) {
+    std::string before = get(s, "state");
+    e.fn(s);
+    render(s, 4410);
+    std::string after = get(s, "state");
+    CHECK(after != before, "the state changed after %s", e.what);
+    CHECK(after.find(" @patches_") == std::string::npos, "an edited patch (%s) is not a reference", e.what);
+    void *t2 = E->create(dataDir);
+    set(t2, "state", after.c_str());
+    render(t2, 1024);
+    int d = stateDiff(s, t2, false, !strcmp(e.what, "a modulation"));
+    CHECK(d == 0, "after %s a restored instance differs in %d values", e.what, d);
+    std::string again = get(s, "state");
+    CHECK(again == after, "an unchanged edited patch saves the same text again");
+    E->destroy(t2);
+  }
+  // back to a plain library patch, then a time for a repeat call (kept) against a first call (saveRaw)
+  seti(s, "patch", n / 4);
+  tap(s, "patch_load");
+  CHECK(waitLoaded(s), "a library patch loads again");
+  render(s, 22050);
+  setf(s, "f1_cutoff", 0.77);
+  double t0 = now();
+  std::string first = get(s, "state");
+  double t1 = now();
+  std::string second = get(s, "state");
+  double t2 = now();
+  CHECK(first == second, "the kept text is the same text");
+  printf("     state: first call %.1f ms, the same state again %.2f ms\n", (t1 - t0) * 1000, (t2 - t1) * 1000);
+  // random edits of any key, each followed by a restore into a second instance: a stale state would differ
+  uint32_t rng = 12345;
+  auto rnd = [&]() { rng = rng * 1664525u + 1013904223u; return (rng >> 8) & 0xffff; };
+  void *t3 = E->create(dataDir);
+  int bad = 0, ops = 0;
+  for (int i = 0; i < 40 && bad == 0; ++i) {
+    const KeyDef &k = kKeys[rnd() % P_COUNT];
+    if (k.bind == B_ENGINE || !strcmp(k.key, "scene")) continue;      // the pages' own keys are covered above
+    if (k.nvals) seti(s, k.key, (int)(rnd() % k.nvals));
+    else if (k.bind == B_BOOL) seti(s, k.key, rnd() & 1);
+    else if (k.bind == B_INTR) seti(s, k.key, (int)(k.lo + rnd() % (int)(k.hi - k.lo + 1)));
+    else setf(s, k.key, (rnd() % 1000) / 1000.0);
+    render(s, 2048);
+    ++ops;
+    set(t3, "state", get(s, "state").c_str());
+    render(t3, 512);
+    if (stateDiff(s, t3, true)) { bad = 1; stateDiff(s, t3); printf("     (after setting %s)\n", k.key); }
+  }
+  CHECK(!bad, "random edits: every state restored the live sound (%d edits)", ops);
+  E->destroy(t3);
+  printf("ok   state kept: an unchanged library patch saves as a file reference, every kind of edit saves in full and "
+         "restores exactly; %d random edits matched\n", ops);
+}
+
 void testState(void *s, const char *dataDir) {
+  timeHousekeeping(s);
   {   // how long the host's "give me your state" call takes: autosave makes it while the audio keeps running
     double worst = 0, sum = 0;
     for (int i = 0; i < 5; ++i) {
@@ -587,19 +722,7 @@ void testState(void *s, const char *dataDir) {
   void *t = E->create(dataDir);
   set(t, "state", st.c_str());
   render(t, 1024);
-  int diff = 0;
-  for (const KeyDef &k : kKeys) {
-    if (k.bind == B_ENGINE && (strstr(k.key, "_prev") || strstr(k.key, "_next") || strstr(k.key, "learn") ||
-                               !strcmp(k.key, "mpe_status"))) continue;   // the status is what this instance has heard
-    // a patch with no wavetable has no table position: the browse position is then whatever was left from before
-    if (get(s, "wt_name").empty() && (!strcmp(k.key, "wt") || !strcmp(k.key, "wt_folder") || !strcmp(k.key, "wt_pic")))
-      continue;
-    std::string a = get(s, k.key), b = get(t, k.key);
-    if (a != b && !(k.bind == B_CONT && fabs(atof(a.c_str()) - atof(b.c_str())) < 1e-4)) {
-      ++diff;
-      if (diff < 10) printf("     state: %s %s != %s\n", k.key, a.c_str(), b.c_str());
-    }
-  }
+  int diff = stateDiff(s, t);
   CHECK(diff == 0, "state restore: %d values differ", diff);
   E->destroy(t);
   printf("ok   state chunk (%zu bytes of text) restores a second instance\n", st.size());
@@ -665,6 +788,7 @@ int main(int argc, char **argv) {
   testMpe(s);
   testPresets(s, data.c_str());
   testAutoload(s);
+  testStateKept(s, data.c_str());
   testState(s, data.c_str());
   E->destroy(s);
   printf(fails ? "FAILED: %d\n" : "PASSED\n", fails);

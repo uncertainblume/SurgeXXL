@@ -2,7 +2,7 @@
   "name": "SurgeXXL",
   "vendor": "L'Cronx",
   "uid": "AnSx",
-  "version": 1006,
+  "version": 1007,
   "so": "surgexxl.so",
   "params": "params.json",
   "layout": "layout.conf",

@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <algorithm>
 #include <atomic>
@@ -73,7 +74,7 @@ const char *kWtPictures[] = {
 const int kNumWtPictures = sizeof(kWtPictures) / sizeof(kWtPictures[0]);
 
 const float kSampleRate = 44100.0f;
-const char *const kVersion = "0.3.2";
+const char *const kVersion = "0.3.3";
 const uint64_t kGestureFrames = 15435;   // 0.35 s: trigger sets closer than this are one Q-Link turn
 const int kRemovedFx[] = {27};           // Spring Reverb (Surge's fx type number)
 const char *kSlotNames[n_fx_slots] = {"A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4",
@@ -419,6 +420,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     int id = patchAt(browse);
     if (id < 0 || loading) return;
     prog = presetOf(id);
+    touched();
     loadedPath = synth->storage.patch_list[id].path.generic_string();
     loadedName = synth->storage.patch_list[id].name;
     joinLoader();
@@ -467,6 +469,8 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     joinLoader();
     synth->patchChanged = false;
     afterPatchLoad();
+    libId = libRel(loadId).empty() ? -1 : loadId;      // a library patch, as loaded: a save can refer to its file
+    libHash = paramHash();
   }
   void stepCategory(int dir) {
     int n = numPatches();
@@ -515,6 +519,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     loading = false;
     // removed FX types: their slots off
     removedFx = 0;
+    touched();
     for (int s = 0; s < n_fx_slots; ++s) {
       int t = patch().fx[s].type.val.i;
       for (int r : kRemovedFx)
@@ -695,6 +700,14 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     }
     finishLoad(false);
     if (loading) return;                       // the load owns the synth (a Q-Link moved meanwhile is dropped)
+    {   // everything but these can change the patch (the state's patch part must then be built again)
+      static const char *const kUiOnly[] = {"osc_sel", "lfo_sel", "fx_sel", "mod_slot", "patch", "patch_prev",
+                                            "patch_next", "cat_prev", "cat_next", "autoload", "mpe", "mpe_bend",
+                                            "preset", "panic", "display_rev"};
+      bool ui = false;
+      for (const char *u : kUiOnly) ui = ui || !strcmp(key, u);
+      if (!ui) touched();
+    }
     if (!strcmp(key, "lfo_bpm")) return;
     auto it = keyIndex().find(key);
     if (it == keyIndex().end()) return;
@@ -951,13 +964,62 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
   }
 
   // ---- state ----
-  int getState(char *buf, int len) {
-    finishLoad(true);      // a project saved while a patch loads waits for it (the output is silent meanwhile) rather
-    if (loading) return 0; // than save no state at all
+  static double nowSec() {
+    timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec + t.tv_nsec * 1e-9;
+  }
+  // The state's patch part. Autosave asks for it every few minutes with the wrapper's lock held, so the audio waits, and
+  // building it is Surge's saveRaw (the bulk of the time). Two ways to skip that work:
+  //  - a library patch nobody has touched is saved as a reference to its file, "@patches_factory/Leads/X.fxp": a few
+  //    dozen bytes, no saveRaw; restoring it loads the file as LOAD does;
+  //  - the patch part of the last state is kept, and handed out again while nothing has changed.
+  // "Nothing has changed" is: no set() of a key that can change the patch (touched()), no load, and the same hash of
+  // every parameter value (paramHash(): what MIDI or Surge itself can change without a set()).
+  std::string stateBody;                // base64 of saveRaw + " STEPS ...", or "@<library file>"
+  bool bodyValid = false;
+  uint64_t bodyHash = 0;                // paramHash() when stateBody was made
+  int libId = -1;                       // the library patch the sound was loaded from, while it is unchanged
+  uint64_t libHash = 0;
+  void touched() { bodyValid = false; libId = -1; }
+  std::string libRel(int id) {          // "patches_factory/Leads/X.fxp": a file of Surge's shipped library, else ""
+    auto &st = synth->storage;
+    if (id < 0 || id >= (int)st.patch_list.size() || st.patch_list[id].category >= st.firstUserCategory) return "";
+    std::string p = st.patch_list[id].path.generic_string();
+    for (const char *m : {"/patches_factory/", "/patches_3rdparty/"}) {
+      size_t k = p.find(m);
+      if (k != std::string::npos) return p.substr(k + 1);
+    }
+    return "";
+  }
+  uint64_t paramHash() {
+    uint64_t h = 1469598103934665603ull;
+    auto mix = [&h](uint64_t v) { h = (h ^ v) * 1099511628211ull; };
+    auto &P = patch();
+    for (auto *p : P.param_ptr) {
+      uint32_t u;
+      memcpy(&u, &p->val, sizeof u);
+      mix(u);
+      mix((uint64_t)p->temposync | (uint64_t)p->absolute << 1 | (uint64_t)p->deactivated << 2 |
+          (uint64_t)p->extend_range << 3 | (uint64_t)(uint32_t)p->deform_type << 8);
+    }
+    for (int sc = 0; sc < n_scenes; ++sc)
+      for (int o = 0; o < n_oscs; ++o) {   // a wavetable Surge has queued but not loaded yet
+        mix((uint32_t)P.scene[sc].osc[o].wt.queue_id);
+        mix((uint32_t)P.scene[sc].osc[o].wt.current_id);
+      }
+    for (int m = 0; m < 8; ++m) {
+      float f = synth->getMacroParameterTarget01(m);
+      uint32_t u;
+      memcpy(&u, &f, sizeof u);
+      mix(u);
+    }
+    mix((uint32_t)P.fx_disable.val.i);
+    return h;
+  }
+  std::string fullBody() {              // saveRaw as base64, then the step sequences (see below), all of it
     void *data = nullptr;
     unsigned n = synth->saveRaw(&data);
-    char head[96];
-    snprintf(head, sizeof head, "SXXL1 %d %d %d %d %d %d ", osc, lfo, fxPos, browse, modSlot, modNewSrc);
     // Surge's patch keeps an LFO's steps only while its shape is Step Seq; the STEP SEQ page edits any LFO's, so they
     // all go in the state too (restored after the patch)
     std::string steps = "STEPS";
@@ -970,13 +1032,34 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
         snprintf(t, sizeof t, " %d %d %.6g %llu", q.loop_start, q.loop_end, q.shuffle, (unsigned long long)q.trigmask);
         steps += t;
       }
-    snprintf(t, sizeof t, " PRG %d", prog);     // the PRESET menu's entry: MPC re-selects it when the project loads
-    steps += t;
-    snprintf(t, sizeof t, " AL %d", autoload ? 1 : 0);
-    steps += t;
-    snprintf(t, sizeof t, " MPE %d %d", mpe ? 1 : 0, mpeRange());   // after the steps: older versions stop reading there
-    steps += t;
-    std::string s = std::string(head) + b64enc((const unsigned char *)data, n) + " " + steps;
+    return b64enc((const unsigned char *)data, n) + " " + steps;
+  }
+  int getState(char *buf, int len) {
+    finishLoad(true);      // a project saved while a patch loads waits for it (the output is silent meanwhile) rather
+    if (loading) return 0; // than save no state at all
+    double tA = nowSec();
+    uint64_t h = paramHash();
+    const char *how = "kept";
+    if (!(bodyValid && h == bodyHash)) {
+      auto &stg = synth->storage;       // a tuning kept from an earlier patch is not in the file
+      bool tuningOk = stg.isStandardTuning || patch().patchTuning.tuningStoredInPatch;
+      std::string rel = libId >= 0 && h == libHash && tuningOk ? libRel(libId) : "";
+      if (!rel.empty()) stateBody = "@" + rel, how = "library file";
+      else stateBody = fullBody(), how = "saveRaw";
+      bodyValid = true;
+      bodyHash = h;
+    }
+    char head[96], tail[160];
+    snprintf(head, sizeof head, "SXXL1 %d %d %d %d %d %d ", osc, lfo, fxPos, browse, modSlot, modNewSrc);
+    // after the patch part, so that older versions stop reading before it: the PRESET menu's entry (MPC re-selects it
+    // when the project loads), Auto Load, MPE
+    // GL: the three settings Surge keeps across patch loads (volume, FX bypass; the poly limit comes with the patch), which
+    // a reference to a patch file cannot carry
+    snprintf(tail, sizeof tail, " PRG %d AL %d MPE %d %d GL %.9g %d", prog, autoload ? 1 : 0, mpe ? 1 : 0, mpeRange(),
+             patch().volume.val.f, patch().fx_bypass.val.i);
+    std::string s = std::string(head) + stateBody + tail;
+    // the device's own numbers, in surgexxl.log, for what a save costs the audio
+    sxxl::Diag::get().log("state: %d bytes of text (%s) in %.2f ms", (int)s.size(), how, (nowSec() - tA) * 1000);
     if ((int)s.size() + 1 > len) return 0;     // never a cut state: the host keeps the last good one
     memcpy(buf, s.c_str(), s.size() + 1);
     return (int)s.size();
@@ -984,33 +1067,67 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
   void setState(const char *s) {
     int o, l, f, b, ms, mn, used = 0;
     if (sscanf(s, "SXXL1 %d %d %d %d %d %d %n", &o, &l, &f, &b, &ms, &mn, &used) != 6 || !used) return;
+    std::string rest(s + used);
+    // the tail (0.3.1 on: PRG, AL, MPE; 0.3.0: MPE; before that none) comes after the patch part
+    size_t tp = rest.rfind(" PRG ");
+    if (tp == std::string::npos) tp = rest.rfind(" MPE ");
+    std::string tail = tp == std::string::npos ? std::string() : rest.substr(tp);
+    std::string main = tp == std::string::npos ? rest : rest.substr(0, tp);
     std::vector<unsigned char> raw;
-    std::string body(s + used), steps;
-    size_t sp = body.find(" STEPS");
-    if (sp != std::string::npos) steps = body.substr(sp + 6), body.resize(sp);
-    if (!b64dec(body.c_str(), raw) || raw.empty()) return;
+    std::string body, steps;
+    int refId = -1;
+    if (!main.empty() && main[0] == '@') {           // a library patch, unchanged when it was saved
+      std::string rel = main.substr(1);
+      for (int i = 0; i < (int)synth->storage.patch_list.size() && refId < 0; ++i)
+        if (libRel(i) == rel) refId = i;
+      if (refId < 0) {
+        sxxl::Diag::get().log("state: the library patch %s is not here; the sound is left as it is", rel.c_str());
+        return;
+      }
+    } else {
+      body = main;
+      size_t sp = body.find(" STEPS");
+      if (sp != std::string::npos) steps = body.substr(sp + 6), body.resize(sp);
+      if (!b64dec(body.c_str(), raw) || raw.empty()) return;
+    }
     {   // a state from before the MPE switch has no MPE section: MPE off, Surge's default range
       int on = 0, range = 48;
-      size_t mp = steps.rfind(" MPE ");
-      if (mp != std::string::npos) sscanf(steps.c_str() + mp, " MPE %d %d", &on, &range);
+      size_t mp = tail.rfind(" MPE ");
+      if (mp != std::string::npos) sscanf(tail.c_str() + mp, " MPE %d %d", &on, &range);
       mpe = on != 0;
       mpeBend = clampi(range, 1, 96);
       int pr = 0;
-      size_t pp = steps.rfind(" PRG ");
-      if (pp != std::string::npos) sscanf(steps.c_str() + pp, " PRG %d", &pr);
+      size_t pp = tail.rfind(" PRG ");
+      if (pp != std::string::npos) sscanf(tail.c_str() + pp, " PRG %d", &pr);
       prog = pr >= 0 && pr < (int)presets.size() ? pr : 0;
       int al = autoload ? 1 : 0;                // a state from before 0.3.2 has none: the instance keeps its setting
-      size_t ap = steps.rfind(" AL ");
-      if (ap != std::string::npos) sscanf(steps.c_str() + ap, " AL %d", &al);
+      size_t ap = tail.rfind(" AL ");
+      if (ap != std::string::npos) sscanf(tail.c_str() + ap, " AL %d", &al);
       autoload = al != 0;
       autoloadAt = 0;
     }
-    synth->loadRaw(raw.data(), (int)raw.size(), false);
+    float glVol = 0;
+    int glByp = 0;
+    size_t gp = tail.rfind(" GL ");
+    bool haveGl = gp != std::string::npos && sscanf(tail.c_str() + gp, " GL %f %d", &glVol, &glByp) == 2;
+    touched();
+    if (refId >= 0) {
+      synth->stopSound();
+      synth->loadPatch(refId);
+      synth->patchChanged = false;
+      patch().isDirty = false;
+    } else {
+      synth->loadRaw(raw.data(), (int)raw.size(), false);
+    }
     osc = clampi(o, 0, n_oscs - 1);
     lfo = clampi(l, 0, 5);
     fxPos = clampi(f, 0, n_fx_slots - 1);
     browse = clampi(b, 0, std::max(0, numPatches() - 1));
     loadedName = patch().name;
+    if (haveGl) {
+      patch().volume.val.f = clampf(glVol, patch().volume.val_min.f, patch().volume.val_max.f);
+      patch().fx_bypass.val.i = clampi(glByp, 0, 3);
+    }
     if (!steps.empty()) {
       const char *q = steps.c_str();
       int nread = 0;
@@ -1038,6 +1155,11 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     afterPatchLoad();
     modSlot = clampi(ms, 0, 63);
     modNewSrc = clampi(mn, 1, n_modsources - 1);
+    // what was restored is what a save would give back: keep it, so a project that is only played is not rebuilt
+    stateBody = main;
+    bodyHash = paramHash();
+    bodyValid = true;
+    if (refId >= 0) libId = refId, libHash = bodyHash;
   }
 
   // ---- MIDI ----

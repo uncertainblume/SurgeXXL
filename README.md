@@ -67,6 +67,8 @@ report what you find under Issues.
   checked on a device. See [MPE](#mpe).
 - **Tested on almost no hardware.** Voice counts and CPU load on each MPC model are unmeasured.
 - **A large package.** About 450 MB on the drive, and it can be slow to copy and to scan.
+- **Audio glitches.** The first MPE test heard some, and a brief glitch has been seen around the MPC's autosave. The
+  cause has not been found; 0.3.3 removes one suspect (the cost of a save) and adds the tools to look at the rest.
 - **A few selector parameters** are flagged by the SDK's host simulator (see [Testing](#testing)).
 
 If you hit something else, it is probably not you. Open an Issue.
@@ -91,9 +93,36 @@ Updating or removing the plugin never touches it.
 
 ## What this fork changed
 
-Four versions so far. **0.2.0** (`sdk-v0.2.0`) is the original instrument, repackaged for the SDK with a 64-bit
+Five versions so far. **0.2.0** (`sdk-v0.2.0`) is the original instrument, repackaged for the SDK with a 64-bit
 build and two crash fixes, and nothing else. **0.3.0** adds MPE. **0.3.1** puts the LinnStrument MPE patches in the
-MPC's preset list. **0.3.2** puts Surge's factory patches there too and adds Auto Load.
+MPC's preset list. **0.3.2** puts Surge's factory patches there too and adds Auto Load. **0.3.3** makes the project save much lighter
+(the MPC's autosave) and adds a benchmark to run on the MPC.
+
+### 0.3.3: a lighter save, and a way to measure
+
+1. **What the plugin hands the MPC when it saves a project is now small and quick for an untouched patch.** When
+   a patch from Surge's own library has been loaded and not edited, the saved state is the patch's file name (about
+   90 bytes) instead of the whole patch (about 45,000 bytes of text). Restoring it loads that file, as LOAD does. A
+   patch you have edited is saved in full, as before, and the saved text is then kept and handed out again while
+   nothing changes, so an autosave of a patch you are only playing costs almost nothing.
+2. **Why this and not just a smaller state:** in the emulator, 11.7 ms of a 13.6 ms save was Surge writing out
+   the patch, and 1.9 ms was turning it into text. A smaller text does not shorten the wait; skipping the writing does.
+   Compressing it would have added time, so it is not done.
+3. **It must never save a stale sound.** The saved text is rebuilt whenever anything that can change a patch is
+   touched, and a fingerprint of every parameter value catches what MIDI or Surge itself can change. The test saves
+   after each kind of edit (a parameter, an option, a switch, a step, a macro, the FX type and its parameters, the
+   wavetable, a modulation) and after 26 random edits, restores each into a second instance, and requires every
+   value to match. A save that is a file reference also keeps the FX bypass setting, which Surge carries across
+   patch loads and a file cannot.
+4. **The plugin writes what each save cost to `surgexxl.log`** (in the `SurgeXXL` folder at the root of the drive):
+   `state: 90 bytes of text (library file) in 0.4 ms`, `... (saveRaw) in 12 ms`, or `(kept)`. After the next
+   autosave it shows what the save really costs on your MPC.
+5. **`tools/bench/mpc_bench.cpp`**, a small program to run on the MPC over SSH, measures how much of the audio
+   budget each patch uses and how long a block is held up by a save. See [Benchmark](#benchmark).
+6. Tests: the reference form, every edit above, the random edits, and the speed of a repeated save.
+
+What this does not do: it does not prove that autosave is what makes the audio glitch (that is still to be seen on
+the device), and it does nothing for Surge's own CPU use, which the benchmark is for.
 
 ### 0.3.2: more presets, and no LOAD press
 
@@ -290,6 +319,30 @@ Bass Guitar
   not documented and has to be checked on a device first. That check is the next step.
 - **The 1024 limit is not the MPC's.** It is a cap in the wrapper this plugin is built on. The list of 700 is
   within it. Whether the MPC's selector scrolls a list that long comfortably is something to find out on a device.
+
+## Benchmark
+
+`tools/bench/mpc_bench.cpp` loads the plugin the way the MPC does and times every audio block, so that the
+glitches can be traced to something. For each patch it plays an 8-note chord for three seconds and reports the
+average, 99th-percentile and worst block time as a percentage of the 2.9 ms a block has, and how many blocks ran
+over. A second thread asks for the plugin's state four times a second while it plays (what autosave does) and the
+report gives the longest state call and the longest block that overlapped one.
+
+Build it on a Linux computer (it needs the Zig toolchain the build already uses), copy it to the MPC and run it
+there with the MPC otherwise quiet, since it shares the CPU with the MPC application:
+
+```
+tools/zig64/zcxx -std=c++17 -O2 -o mpc_bench tools/bench/mpc_bench.cpp -ldl -lpthread
+scp mpc_bench root@<mpc ip>:/tmp/
+ssh root@<mpc ip> "/tmp/mpc_bench '/nvme/VST2 Plugins/L'\''Cronx - VST - SurgeXXL/VST/surgexxl-arm64.so' --every 25"
+```
+
+The "state ms" figure is the whole call as the host sees it, so it includes any wait for the audio block that is
+running at the time to finish; the plugin's own log (`surgexxl.log`) gives the time of the work itself.
+
+`--every N` tries every Nth program, `--programs 2,50,300` picks them, `--notes` changes the chord size, `--seconds`
+the length. It writes nothing but its report and opens no audio device. Run on the MPC, the figures say what one
+instance costs; two instances cost about twice as much, and so on.
 
 ## About this fork, and how it was made
 

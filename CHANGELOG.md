@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.3
+A lighter project save (the MPC's autosave), and a benchmark. Built and tested offline.
+- **The state is a file reference for an untouched library patch**: `SXXL1 ... @patches_factory/Leads/X.fxp ...`, about
+  90 bytes and no saveRaw, instead of about 45,000 bytes of text. A restore loads the file as LOAD does. A reference
+  also carries the FX bypass setting, which Surge keeps across loads (new `GL` item at the end of the state).
+- **The patch part of the last state is kept** and handed out again while nothing has changed: no `set()` of a key
+  that can change the patch, no load, and the same fingerprint of every parameter value, wavetable queue and macro.
+  A restored state seeds it. An edited patch is still saved in full.
+- Measured in the emulator: a save was 13.6 ms, 11.7 ms of it Surge's saveRaw and 1.9 ms turning it into text, so a
+  smaller text would not have helped; a repeat save is 0.2 ms, a reference 0.4 ms.
+- `surgexxl.log` records every save: its size, how it was made (`library file`, `saveRaw` or `kept`) and its time.
+- `tools/bench/mpc_bench.cpp`: a small host to run on the MPC over SSH that times the audio blocks per patch and the
+  block held up by a state call.
+- `engine_test`: reference states, every kind of edit saved and restored exactly, 26 random edits, the speed of a
+  repeated save, and the audio-thread cost of the wrapper's readout polling (0.04 ms per 100 ms).
+- Older states load unchanged; a state saved by 0.3.3 as a reference or with the new item reads in 0.3.2 only as far as
+  the patch (0.3.2 cannot read a reference).
+
+
 ## 0.3.2
 More presets, and no LOAD press. Built and tested offline.
 - **700 VST programs** (was 76): the 76 of 0.3.1 keep their positions (projects saved with it keep their entry),
