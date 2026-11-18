@@ -68,7 +68,12 @@ report what you find under Issues.
 - **Tested on almost no hardware.** Voice counts and CPU load on each MPC model are unmeasured.
 - **A large package.** About 450 MB on the drive, and it can be slow to copy and to scan.
 - **Audio glitches.** The first MPE test heard some, and a brief glitch has been seen around the MPC's autosave. The
-  cause has not been found; 0.3.3 removes one suspect (the cost of a save) and adds the tools to look at the rest.
+  cause has not been found; 0.3.3 removes one suspect (the cost of a save) and adds the tools to look at the rest
+  (the benchmark, and the log that 0.3.4 extends).
+- **Hanging notes.** After the glitch around the MPC's autosave, a note can keep sounding until the same key is hit
+  again (the PATCH page's PANIC also clears it). 0.3.4 lets go of held notes when the MPC resumes the plugin and logs
+  what happens; the cause is not known, and it may be the MPC's own MIDI input dropping a note-off, which the plugin
+  cannot repair. See [0.3.4](#034-hanging-notes).
 - **A few selector parameters** are flagged by the SDK's host simulator (see [Testing](#testing)).
 
 If you hit something else, it is probably not you. Open an Issue.
