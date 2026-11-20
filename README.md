@@ -30,6 +30,11 @@ voice handling built in. Those patches are wonderful in Surge on a computer, and
 per-note slides and pressure, on an MPC, perhaps as my main LinnStrument synth. Version 0.3.0 adds what that needs;
 see [MPE](#mpe) for what is there and what is still unproven.
 
+
+
+If anyone finds any of this this super useful and can afford it, send me a tip on PayPal, I'm hilariously unemployed: <img width="500" height="500" alt="paypalqrcode" src="https://github.com/user-attachments/assets/f481d192-200a-4d61-a5a7-09f00cb26175" />
+
+
 ## Status
 
 > [!WARNING]
