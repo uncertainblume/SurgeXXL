@@ -799,6 +799,67 @@ void testReloadSave(void *s, const char *dataDir) {
          paid ? "; paid again: " : "", missed.c_str());
 }
 
+// MPC pads send a note with no pressure; Surge's MPE patches may take their loudness from pressure. For every
+// LinnStrument MPE patch: how loud is a pad note (channel 1, no pressure) against the same note with pressure sent first?
+double padPeak(void *s, int ch, int vel, int pressureFirst) {
+  uint8_t on[3] = {(uint8_t)(0x90 | ch), 60, (uint8_t)vel}, off[3] = {(uint8_t)(0x80 | ch), 60, 64};
+  if (pressureFirst >= 0) { uint8_t pr[2] = {(uint8_t)(0xd0 | ch), (uint8_t)pressureFirst}; E->midi(s, pr, 2); }
+  E->midi(s, on, 3);
+  Audio a;
+  render(s, 8820, &a);
+  E->midi(s, off, 3);
+  render(s, 13230);
+  if (pressureFirst >= 0) { uint8_t pr[2] = {(uint8_t)(0xd0 | ch), 0}; E->midi(s, pr, 2); }
+  return a.peak;
+}
+void testPadLoudness(void *s) {
+  seti(s, "autoload", 0);
+  seti(s, "mpe", 1);
+  int n = atoi(get(s, "test_num_patches").c_str());
+  int tried = 0, dependent = 0;
+  std::string names;
+  for (int i = 0; i < n; ++i) {
+    seti(s, "patch", i);
+    if (get(s, "patch_cat").find("LinnStrument MPE") == std::string::npos) continue;
+    tap(s, "patch_load");
+    if (!waitLoaded(s)) continue;
+    render(s, 4410);
+    double noP = padPeak(s, 0, 100, -1), withP = padPeak(s, 0, 100, 100);
+    ++tried;
+    if (noP < 0.5 * withP) {
+      ++dependent;
+      char t[96];
+      snprintf(t, sizeof t, "%s%s (%.3f vs %.3f)", names.empty() ? "" : "; ", get(s, "patch_browse").c_str(), noP, withP);
+      names += t;
+    }
+  }
+  CHECK(tried >= 60, "%d LinnStrument MPE patches tried", tried);
+  CHECK(dependent == 0, "with MPE on, a pad note with no pressure is at least half as loud as with pressure: %d of %d are not: %s",
+        dependent, tried, names.c_str());
+  // what must not change: a note that comes with its own pressure (a LinnStrument sends 0 before the note-on) keeps it,
+  // and with MPE off nothing is added
+  int at = -1;
+  for (int i = 0; i < n && at < 0; ++i) {
+    seti(s, "patch", i);
+    if (get(s, "patch_browse") == "Sad Subway Horn" && get(s, "patch_cat").find("LinnStrument MPE") != std::string::npos) at = i;
+  }
+  CHECK(at >= 0, "Sad Subway Horn is in the library");
+  tap(s, "patch_load");
+  CHECK(waitLoaded(s), "Sad Subway Horn loads");
+  render(s, 4410);
+  double pad = padPeak(s, 0, 100, -1), full = padPeak(s, 0, 100, 100), zero = padPeak(s, 1, 100, 0);
+  seti(s, "mpe", 0);
+  render(s, 2048);
+  double off = padPeak(s, 0, 100, -1);
+  CHECK(pad > 0.5 * full, "MPE on, pad note: %.3f against %.3f with pressure", pad, full);
+  CHECK(zero < 0.3 * full, "a note whose own pressure is 0 stays quiet: %.3f against %.3f", zero, full);
+  CHECK(off < 0.3 * full, "MPE off adds nothing: %.3f against %.3f", off, full);
+  seti(s, "mpe", 1);
+  printf("ok   pad notes: all %d LinnStrument MPE patches play a pad note (no pressure) at least half as loud as with "
+         "pressure; Sad Subway Horn: pad %.3f, with pressure %.3f, its own pressure 0 %.3f, MPE off %.3f\n", tried, pad,
+         full, zero, off);
+}
+
 void testState(void *s, const char *dataDir) {
   timeHousekeeping(s);
   {   // how long the host's "give me your state" call takes: autosave makes it while the audio keeps running
@@ -888,6 +949,7 @@ int main(int argc, char **argv) {
   testReferenceRate(s);
   testReloadSave(s, data.c_str());
   testHostEvents(s);
+  testPadLoudness(s);
   testState(s, data.c_str());
   E->destroy(s);
   printf(fails ? "FAILED: %d\n" : "PASSED\n", fails);

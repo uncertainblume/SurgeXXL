@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.6
+Pads (notes with no pressure) on the MPE patches. Built and tested offline.
+- With MPE on, a note-on on a channel that has had no channel pressure since its last note-on or note-off starts at a pressure
+  equal to the velocity (`channelAftertouch`, so channel 1 also sets Surge's global aftertouch, as a real message would).
+  Notes already sounding on the channel keep the louder value. A note with its own pressure (the LinnStrument sends 0
+  first) is untouched; with MPE off nothing is added.
+- `engine_test`: all 63 LinnStrument MPE patches play a pad note at least half as loud as with pressure (34 did not before);
+  a note with its own pressure 0 stays quiet; MPE off adds nothing.
+
 ## 0.3.5
 The first save after a project loads, found on the first Live III run. Built and tested offline.
 - The fingerprint that tells whether the kept state text is current no longer includes the `deactivated` flag, which Surge

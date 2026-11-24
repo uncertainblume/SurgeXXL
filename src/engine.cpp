@@ -74,7 +74,7 @@ const char *kWtPictures[] = {
 const int kNumWtPictures = sizeof(kWtPictures) / sizeof(kWtPictures[0]);
 
 const float kSampleRate = 44100.0f;
-const char *const kVersion = "0.3.5";
+const char *const kVersion = "0.3.6";
 const uint64_t kGestureFrames = 15435;   // 0.35 s: trigger sets closer than this are one Q-Link turn
 const int kRemovedFx[] = {27};           // Spring Reverb (Surge's fx type number)
 const char *kSlotNames[n_fx_slots] = {"A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4",
@@ -1227,7 +1227,7 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     for (auto &r : held) for (bool b : r) c += b;
     return c;
   }
-  void clearHeld() { memset(held, 0, sizeof held); }
+  void clearHeld() { memset(held, 0, sizeof held); memset(pressSeen, 0, sizeof pressSeen); }
   void track(int st, int ch, int d1, int d2) {
     if (st == 0x90 && d2) {
       if (held[ch][d1] && anomalies < 40) {
@@ -1266,11 +1266,31 @@ struct Inst : public SurgeSynthesizer::PluginLayer {
     if (portSeen) return;                      // the port has taken over
     play(m, n);
   }
+  // MPE: Surge's MPE patches take their loudness from each note's pressure (34 of the 63 LinnStrument patches are less than
+  // half as loud without it, some near silent), and a note that arrives with none (an MPC pad, a recorded take that lost
+  // it, a controller with Z switched off) would start at pressure 0. A LinnStrument sends its note's pressure just before
+  // the note-on, so for it nothing changes. Without one, the note's pressure starts from its velocity, as a channel
+  // pressure message on the note's channel would set it (on channel 1, MPE's global channel, that is also Surge's global
+  // aftertouch, which some patches read: found on Sad Subway Horn). Only with MPE on: otherwise pressure is a global
+  // aftertouch that every note shares.
+  bool pressSeen[16] = {};
+  void startPressure(int ch, int vel) {
+    int onChannel = 0;
+    for (bool b : held[ch]) onChannel += b;
+    int cur = (int)lroundf(synth->channelState[ch].pressure * 127.f);
+    if (onChannel <= 1 || vel > cur) synth->channelAftertouch(ch, vel);   // notes already sounding keep the louder
+  }
   void play(const uint8_t *m, int n) {
     if (n < 1 || loading) return;              // the load stops every voice anyway
     int st = m[0] & 0xf0, ch = m[0] & 0x0f;
     int d1 = n > 1 ? m[1] & 0x7f : 0, d2 = n > 2 ? m[2] & 0x7f : 0;
     track(st, ch, d1, d2);
+    if (st == 0xd0) pressSeen[ch] = true;
+    else if (st == 0x80 || (st == 0x90 && !d2)) pressSeen[ch] = false;
+    else if (st == 0x90) {
+      if (mpe && !pressSeen[ch]) startPressure(ch, d2);
+      pressSeen[ch] = false;
+    }
     switch (st) {
       case 0x90:
         if (d2) synth->playNote(ch, d1, d2, 0);

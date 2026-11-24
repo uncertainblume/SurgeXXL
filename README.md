@@ -98,12 +98,33 @@ Updating or removing the plugin never touches it.
 
 ## What this fork changed
 
-Seven versions so far. **0.2.0** (`sdk-v0.2.0`) is the original instrument, repackaged for the SDK with a 64-bit
+Eight versions so far. **0.2.0** (`sdk-v0.2.0`) is the original instrument, repackaged for the SDK with a 64-bit
 build and two crash fixes, and nothing else. **0.3.0** adds MPE. **0.3.1** puts the LinnStrument MPE patches in the
 MPC's preset list. **0.3.2** puts Surge's factory patches there too and adds Auto Load. **0.3.3** makes the project save much lighter
 (the MPC's autosave) and adds a benchmark to run on the MPC. **0.3.4** tries to recover from hanging notes and logs
 what the MPC does to the plugin, so that the cause can be found. **0.3.5** fixes the first save after a project loads
-(measured on a Live III) and improves the benchmark.
+(measured on a Live III) and improves the benchmark. **0.3.6** makes notes that come without pressure (the MPC's pads) audible on the MPE patches.
+
+### 0.3.6: pads on the MPE patches
+
+On a Live III, playing the MPC's pads into a SurgeXXL track set to an MPE patch gave the right notes at a nearly
+inaudible level. Surge's MPE patches take their loudness from each note's **pressure**, which a LinnStrument sends just
+before every note and the pads never send. Measured offline across all 63 LinnStrument MPE patches: 34 were less than
+half as loud for a note with no pressure, several near silent (Erhu and the Talking Synths 0.000, Miles Trumpet 0.003
+against 0.275 with pressure).
+
+1. **With MPE on, a note that arrives with no pressure now starts at a pressure equal to its velocity**, as a channel
+   pressure message on its channel would set it (so a hard pad hit is loud, a soft one is soft). If notes are already
+   sounding on that channel, the louder value is kept. The bridge in the mpc-mpe project does the same (its Z Start).
+2. **A note that brings its own pressure is untouched**: a LinnStrument sends pressure 0 just before a note-on and that
+   stays 0. **With MPE off nothing is added**, because pressure is then one global aftertouch shared by every note.
+3. **Tests:** every one of the 63 patches plays a pad note at least half as loud as the same note with pressure (before the
+   change 34 did not, and one patch, Sad Subway Horn, still failed with a first version that did not set Surge's global
+   aftertouch on channel 1, which is where pads arrive); a note with its own pressure 0 stays quiet; MPE off adds nothing.
+4. **What this does not answer:** why pads reach a SurgeXXL track set to take MIDI from the bridge only. The plugin never
+   sees which port the MPC took the MIDI from; it plays what the MPC gives it on its track, or what is written to its own
+   "SurgeXXL MIDI In" port. The status line on the PATCH page shows which of the two the notes came by. See
+   [MPE](#mpe).
 
 ### 0.3.5: the first save after a project loads
 
